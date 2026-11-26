@@ -65,6 +65,21 @@ export const PALETTE = {
   grassLow: '#79a95c',
   grassHigh: '#4d7d43',
   scrub: '#5d8a4c',
+  // The worked lowlands: crop tones a pilot reads as farmland from
+  // pattern altitude — ripe wheat, young crop, deep pasture, fresh
+  // plough and pale fallow — fenced by dark hedgerows and crossed by
+  // sandy dirt tracks that ring the two big islands.
+  cropWheat: '#c8ad55',
+  cropYoung: '#7cab4a',
+  cropDeep: '#4f7d38',
+  cropPlough: '#8a6849',
+  cropFallow: '#b5a26e',
+  hedge: '#33512e',
+  dirt: '#b3986a',
+  // Distance haze: far ground, far sea and the horizon itself all
+  // lean toward this one pale blue, so the world dissolves into the
+  // sky instead of ending at a drawn line.
+  haze: '#bcd6e4',
   treeDark: '#2e5d33',
   treeLight: '#4c8148',
   // Broadleaf tones, taken from a real park tree's crown: a grey-brown

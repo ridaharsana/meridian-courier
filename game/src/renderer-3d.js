@@ -123,11 +123,17 @@ export function terrainBaseRgb(h, slope, x, z) {
   // v9: one noise-warped height reads the whole shore band, so every
   // contour the ramp draws near the water — shelf, shallows, wet
   const shoreW = sstep(-7, -2.5, h) * (1 - sstep(5.5, 9.5, h));
-  const hw = h + chartNoise(x * 6.1, z * 6.1) * 0.9 * shoreW;
+  // v10: a second, slower warp for the deep shelf — the shore warp
+  // dies below −7 m, which left the deep contours printing as one
+  // long straight edge across the bay. This bends them organic.
+  const deepW = sstep(-3, -6, h);
+  const hw = h + chartNoise(x * 6.1, z * 6.1) * 0.9 * shoreW
+    + (chartNoise(x * 3.4 + 31, z * 3.4 - 17) * 2.6
+      + chartNoise(x * 9.3 - 7, z * 9.3 + 13) * 0.8) * deepW;
   if (h < 0.4) {
     // Underwater: the shelf falls away in one gradient, deep
     // blue-green under the keel to pale turquoise at the lip, then
-    let c = mixRgb(hexRgb(PALETTE.seaDeep), hexRgb(PALETTE.seaFloor), sstep(-11, -4, hw));
+    let c = mixRgb(hexRgb(PALETTE.seaDeep), hexRgb(PALETTE.seaFloor), sstep(-13, -2.2, hw));
     c = mixRgb(c, hexRgb(PALETTE.seaShelf), sstep(-4.5, -1.2, hw));
     c = mixRgb(c, hexRgb(PALETTE.seaShallow), sstep(-3.4, 0.8, hw));
     c = mixRgb(c, hexRgb(PALETTE.sandWet), sstep(-0.5, 1.4, hw));
@@ -272,7 +278,10 @@ export function createCamera() {
 // Chase camera: settles behind and above the tail, leaning into the bank so
 // the horizon tilts with the aeroplane instead of fighting it. A posed
 export function chaseCamera(camera, plane, dt, snap = false, view = null) {
-  const back = 10.5 + plane.speed * 0.02;
+  // A posed view may pull the station back (view.back) and aim off
+  // the course line (view.aimSide) — the v10 cover uses both to
+  // hold the three-quarter angle yet centre the aeroplane.
+  const back = view && view.back ? view.back : 10.5 + plane.speed * 0.02;
   const fx = Math.sin(plane.heading);
   const fz = -Math.cos(plane.heading);
   const side = view ? view.side : 0;
@@ -284,8 +293,8 @@ export function chaseCamera(camera, plane, dt, snap = false, view = null) {
   camera.y += (ty - camera.y) * k;
   camera.z += (tz - camera.z) * k;
   if (view) {
-    const ax = plane.x + fx * view.aim - camera.x;
-    const az = plane.z + fz * view.aim - camera.z;
+    const ax = plane.x + fx * view.aim + Math.cos(plane.heading) * (view.aimSide || 0) - camera.x;
+    const az = plane.z + fz * view.aim + Math.sin(plane.heading) * (view.aimSide || 0) - camera.z;
     camera.heading = Math.atan2(ax, -az);
     camera.pitch = Math.atan2(plane.y - camera.y, Math.hypot(ax, az)) + plane.pitch * 0.55;
   } else {
@@ -469,7 +478,9 @@ export function drawTerrain(ctx, project, plane) {
       const x = gx * step;
       const z = gz * step;
       const h = groundHeight(x + step / 2, z + step / 2);
-      if (h < -12.5) continue; // only the true abyss is the flat sea's job
+      // v10: every cell is drawn, sea floor included — cutting the
+      // mesh at any depth left the shelf ending against the flat
+      // sea along a grid-stepped straight edge (see above).
       const dx = x + step / 2 - plane.x;
       const dz = z + step / 2 - plane.z;
       cells.push({ x, z, h, d2: dx * dx + dz * dz });
@@ -482,7 +493,12 @@ export function drawTerrain(ctx, project, plane) {
     // six ways, the mid-distance two, and the far hills two as well
     const dist = Math.sqrt(cell.d2);
     const shoreCell = cell.h > -9 && cell.h < 10;
-    const n = dist < 520 ? (shoreCell ? 12 : 8) : dist < 2400 ? (cell.h > 45 ? 3 : shoreCell ? 4 : 2) : cell.h > 45 ? 2 : 1;
+    // v10: deep cells subdivide like shore cells (at n=1–2 the
+    // deep gradient averaged into terraced 65–130 m steps), while
+    // a true floor cell is one flat deep quad at any distance.
+    const deepCell = cell.h < -9;
+    const floorCell = cell.h <= -13.9;
+    const n = floorCell ? 1 : dist < 520 ? (shoreCell ? 12 : 8) : dist < 2400 ? (cell.h > 45 ? 3 : shoreCell || deepCell ? 4 : 2) : cell.h > 45 || deepCell ? 2 : 1;
     const pts = [];
     for (let j = 0; j <= n; j++) {
       for (let i = 0; i <= n; i++) {
@@ -501,13 +517,21 @@ export function drawTerrain(ctx, project, plane) {
     }
     // Each sub-quad takes the average of its four lit corners: with
     // corners shared between neighbours and colours drawn from the
+    const seaRgb = hexRgb(PALETTE.sea);
     const hazed = (p) => {
       const w = sstep(1500, 3500, p.depth) * 0.6;
-      return [
-        p.r + (hazeRgb[0] - p.r) * w,
-        p.g + (hazeRgb[1] - p.g) * w,
-        p.b + (hazeRgb[2] - p.b) * w,
-      ];
+      let r = p.r + (hazeRgb[0] - p.r) * w;
+      let g = p.g + (hazeRgb[1] - p.g) * w;
+      let b = p.b + (hazeRgb[2] - p.b) * w;
+      // v10: far water leans toward the flat sea's mid tone near
+      // the mesh radius, meeting the backdrop sea without a step.
+      if (p.wh < 0.4) {
+        const fw = sstep(2000, 3300, p.depth) * 0.5;
+        r += (seaRgb[0] - r) * fw;
+        g += (seaRgb[1] - g) * fw;
+        b += (seaRgb[2] - b) * fw;
+      }
+      return [r, g, b];
     };
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
@@ -519,9 +543,10 @@ export function drawTerrain(ctx, project, plane) {
         const cb = hazed(b);
         const cc = hazed(c);
         const cd = hazed(d);
-        // Shore-band dither: a breath of per-quad hash grain, so the
-        // eye reads texture where the ramp steps, not a tiled grid.
-        const jit = shoreCell
+        // Water dither: per-quad hash grain so the eye reads
+        // texture where the ramp steps — v10 extends the shore
+        // band's dither to every water cell, deep shelf included.
+        const jit = shoreCell || cell.h < 0.4
           ? 0.965 + cellHash(Math.round(cell.x / step) * 57 + i * 3, Math.round(cell.z / step) * 57 + j * 3) * 0.07
           : 1;
         ctx.fillStyle = `rgb(${Math.round(((ca[0] + cb[0] + cc[0] + cd[0]) / 4) * jit)},${Math.round(((ca[1] + cb[1] + cc[1] + cd[1]) / 4) * jit)},${Math.round(((ca[2] + cb[2] + cc[2] + cd[2]) / 4) * jit)})`;

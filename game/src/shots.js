@@ -9,10 +9,17 @@ export function applyShotScene(game, name) {
   // The posed chase view (v9): cover and cargo are shot from a rear
   // three-quarter station, not dead astern — from square behind, the
   game.shotCam = null;
-  const QUARTER = { side: 5.0, up: 3.3, aim: 40 };
+  // v10: the cover station pulls back and aims off the course line
+  // (back 17, aimSide −10) — v9's close quarter parked the plane in
+  // the lower-left; from further back the flank reads gentler and
+  // the off-line aim centres the plane with the ring still ahead.
+  const QUARTER = { side: 6.5, up: 2.4, aim: 42, back: 17, aimSide: -10 };
   // Cargo is shot from the port quarter instead: its showcase is the
   // fleet working the bay ahead-left, and a starboard station swings
   const QUARTER_PORT = { side: -5.0, up: 3.3, aim: 40 };
+  // v10: the finale joins the family — a gentler starboard quarter,
+  // so the strip still runs ahead under the plane.
+  const QUARTER_FINALE = { side: 5.5, up: 2.8, aim: 34, back: 15, aimSide: -5 };
   if (name === 'approach') {
     // Cockpit on final for Porto Lume Strip 36: runway ahead and filling
     // the windscreen, gear down, glide alive on the panel.
@@ -47,6 +54,7 @@ export function applyShotScene(game, name) {
     game.missionState.ringsPassed = 8;
     game.missionState.mission.rings.forEach((r) => { r.passed = true; });
     game.cameraMode = 'chase';
+    game.shotCam = QUARTER_FINALE;
   } else {
     // cover: the Ring Run, second gate ahead, home isle spread below.
     startSortie(game, 0);

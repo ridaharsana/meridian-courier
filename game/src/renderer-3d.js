@@ -8,11 +8,14 @@
 import { WORLD, PALETTE, RUNWAYS, ISLANDS } from './config.js';
 import { groundHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
 
-// The sun's direction, one for the whole world: high, east and a little
-// north — (0.55, 0.78, -0.3) unnormalised. Every slope shade, glitter
-// path and lit wall in this file is computed against it, so the light
-// agrees with itself from the sky down to the harbour rooftops.
-const SUN_DIR = { x: 0.55, y: 0.78, z: -0.3 };
+// The sun's direction, one for the whole world — and, since v6,
+// shared with aircraft-art.js so the aeroplane is lit by the same
+// sun as the ground it flies over. Golden hour: low in the east and
+// a little north — (0.66, 0.34, -0.38) unnormalised — so slopes rake,
+// shadows lengthen and the sea can hold a glitter path. Every slope
+// shade, glitter dash and lit wall in the game is computed against
+// it, so the light agrees with itself from the sky to the rooftops.
+export const SUN_DIR = { x: 0.66, y: 0.34, z: -0.38 };
 
 // Scale a #rrggbb colour by a light factor, clamped so shade never
 // crushes to black or blows to white.
@@ -304,12 +307,15 @@ export function createCamera() {
 }
 
 // Chase camera: settles behind and above the tail, leaning into the bank so
-// the horizon tilts with the aeroplane instead of fighting it.
+// the horizon tilts with the aeroplane instead of fighting it. Since
+// v6 it flies closer and lower — the Petrel is real 3D geometry now
+// and fills near half the frame, the way a chase plane on a filming
+// sortie actually frames her.
 export function chaseCamera(camera, plane, dt, snap = false) {
-  const back = 17 + plane.speed * 0.05;
+  const back = 10.5 + plane.speed * 0.02;
   const tx = plane.x - Math.sin(plane.heading) * back;
   const tz = plane.z + Math.cos(plane.heading) * back;
-  const ty = plane.y + 5.2;
+  const ty = plane.y + 2.6;
   const k = snap ? 1 : Math.min(1, dt * 7);
   camera.x += (tx - camera.x) * k;
   camera.y += (ty - camera.y) * k;
@@ -336,21 +342,13 @@ export function makeProjector(camera, width, height) {
   const cp = Math.cos(camera.pitch);
   const sp = Math.sin(camera.pitch);
   const focal = (height * 0.5) / Math.tan(camera.fov / 2);
-  return function project(x, y, z) {
-    let dx = x - camera.x;
-    let dy = y - camera.y;
-    let dz = z - camera.z;
-    let cx = dx * rx + dz * rz;
-    let cz = dx * fx + dz * fz;
-    let cy = dy * cp - cz * sp;
-    cz = dy * sp + cz * cp;
-    if (cz < 2) return null;
+  const cr = Math.cos(-camera.roll);
+  const sr = Math.sin(-camera.roll);
+  const toScreen = (cx, cy, cz) => {
     const s = focal / cz;
     // Roll the picture around its centre: the world leans, the panel doesn't.
     const px = cx * s;
     const py = -cy * s;
-    const cr = Math.cos(-camera.roll);
-    const sr = Math.sin(-camera.roll);
     return {
       x: width / 2 + px * cr - py * sr,
       y: height / 2 + px * sr + py * cr,
@@ -358,6 +356,49 @@ export function makeProjector(camera, width, height) {
       scale: s,
     };
   };
+  const basis = (x, y, z) => {
+    const dx = x - camera.x;
+    const dy = y - camera.y;
+    const dz = z - camera.z;
+    const cx = dx * rx + dz * rz;
+    const cz0 = dx * fx + dz * fz;
+    return { cx, cy: dy * cp - cz0 * sp, cz: dy * sp + cz0 * cp };
+  };
+  function project(x, y, z) {
+    const { cx, cy, cz } = basis(x, y, z);
+    if (cz < 0.5) return null;
+    return toScreen(cx, cy, cz);
+  }
+  // Polygon clipping against the near plane, for ground quads: a
+  // quad straddling the camera is cut at half a metre and the cut
+  // polygon paints to the frame's edges, instead of the whole quad
+  // vanishing and leaving the sea showing under the aeroplane on a
+  // ground roll. (Sliding the lost corners along their own rays —
+  // the obvious shortcut — images them across the centre and the
+  // polygon still misses the ground it should cover; the cut has
+  // to happen on the edges, in camera space.)
+  project.clipPolygon = (worldPts) => {
+    let poly = worldPts.map((p) => basis(p.x, p.y, p.z));
+    const res = [];
+    for (let i = 0; i < poly.length; i++) {
+      const cur = poly[i];
+      const prev = poly[(i + poly.length - 1) % poly.length];
+      const curIn = cur.cz >= 0.5;
+      const prevIn = prev.cz >= 0.5;
+      if (curIn !== prevIn) {
+        const t = (0.5 - prev.cz) / (cur.cz - prev.cz);
+        res.push({
+          cx: prev.cx + (cur.cx - prev.cx) * t,
+          cy: prev.cy + (cur.cy - prev.cy) * t,
+          cz: 0.5,
+        });
+      }
+      if (curIn) res.push(cur);
+    }
+    if (res.length < 3) return null;
+    return res.map((p) => toScreen(p.cx, p.cy, p.cz));
+  };
+  return project;
 }
 
 export function drawSky(ctx, camera, width, height) {
@@ -365,24 +406,24 @@ export function drawSky(ctx, camera, width, height) {
   const g = ctx.createLinearGradient(0, 0, 0, Math.max(1, horizon));
   g.addColorStop(0, PALETTE.skyTop);
   g.addColorStop(0.45, PALETTE.skyMid);
-  g.addColorStop(0.78, '#bcd9ee');
+  g.addColorStop(0.78, '#e9c493');
   g.addColorStop(1, PALETTE.skyLow);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, width, Math.max(0, horizon + 2));
-  // The sun, high off the port bow: a radial glow that falls off in
-  // rings, a warm wash under it, and a near-white core.
-  const sx = width * 0.82;
-  const sy = height * 0.13;
-  const glow = ctx.createRadialGradient(sx, sy, 4, sx, sy, 120);
-  glow.addColorStop(0, 'rgba(255,246,205,0.55)');
-  glow.addColorStop(0.35, 'rgba(255,240,190,0.22)');
-  glow.addColorStop(1, 'rgba(255,240,190,0)');
+  // The sun, low off the port bow at golden hour: a wide radial glow
+  // that falls off in rings, a warm wash under it, and a pale core.
+  const sx = width * 0.84;
+  const sy = height * 0.19;
+  const glow = ctx.createRadialGradient(sx, sy, 4, sx, sy, 190);
+  glow.addColorStop(0, 'rgba(255,205,130,0.6)');
+  glow.addColorStop(0.35, 'rgba(255,185,105,0.25)');
+  glow.addColorStop(1, 'rgba(255,185,105,0)');
   ctx.fillStyle = glow;
-  ctx.fillRect(sx - 120, sy - 120, 240, 240);
-  const core = ctx.createRadialGradient(sx - 6, sy - 6, 2, sx, sy, 27);
+  ctx.fillRect(sx - 190, sy - 190, 380, 380);
+  const core = ctx.createRadialGradient(sx - 6, sy - 6, 2, sx, sy, 25);
   core.addColorStop(0, PALETTE.sunCore);
   core.addColorStop(0.8, PALETTE.sun);
-  core.addColorStop(1, 'rgba(255,243,196,0.85)');
+  core.addColorStop(1, 'rgba(255,217,163,0.85)');
   ctx.fillStyle = core;
   ctx.beginPath();
   ctx.arc(sx, sy, 26, 0, Math.PI * 2);
@@ -396,31 +437,33 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
   // The far water starts as haze-blue and only deepens as it nears,
   // so the sea climbs into the sky instead of meeting it at a cut.
   const g = ctx.createLinearGradient(0, horizon, 0, height);
-  g.addColorStop(0, '#86aec2');
+  g.addColorStop(0, '#cfa878');
   g.addColorStop(0.22, '#2b8296');
   g.addColorStop(0.55, PALETTE.sea);
   g.addColorStop(1, PALETTE.seaDeep);
   ctx.fillStyle = g;
   ctx.fillRect(0, horizon, width, height - horizon);
-  // A soft band of horizon haze straddling the waterline: strongest
-  // exactly where sea meets sky, gone a few dozen pixels either way.
+  // A soft band of warm horizon haze straddling the waterline:
+  // strongest exactly where sea meets sky, gone a few dozen pixels
+  // either way.
   const band = ctx.createLinearGradient(0, horizon - 14, 0, horizon + 64);
-  band.addColorStop(0, 'rgba(188,214,228,0)');
-  band.addColorStop(0.18, 'rgba(188,214,228,0.5)');
-  band.addColorStop(1, 'rgba(188,214,228,0)');
+  band.addColorStop(0, 'rgba(232,201,154,0)');
+  band.addColorStop(0.18, 'rgba(232,201,154,0.5)');
+  band.addColorStop(1, 'rgba(232,201,154,0)');
   ctx.fillStyle = band;
   ctx.fillRect(0, horizon - 14, width, 78);
-  // Sun glitter: a bright path on the water under the sun, dashes
-  // clustered toward the sun's side of the frame and thinning outward,
-  // plus a sparse scatter elsewhere — it sells the altitude instantly.
-  for (let i = 0; i < 58; i++) {
-    const onPath = i < 40;
-    const gx = onPath ? 0.82 + (((i * 197) % 199) / 199 - 0.5) * 0.52 : ((i * 613) % 997) / 997;
+  // Sun glitter: at golden hour the path on the water under the sun
+  // runs broad and warm — dashes clustered toward the sun's side of
+  // the frame and thinning outward, plus a sparse scatter elsewhere.
+  // It sells the altitude, and the hour, instantly.
+  for (let i = 0; i < 74; i++) {
+    const onPath = i < 52;
+    const gx = onPath ? 0.84 + (((i * 197) % 199) / 199 - 0.5) * 0.68 : ((i * 613) % 997) / 997;
     const gz = 300 + ((i * 389) % 2600);
     const p = project(camera.x + (gx - 0.5) * gz * 1.6, 0, camera.z + gz * 0.4 + (i % 7) * 90);
     if (p && p.x > -20 && p.x < width + 20 && p.y > horizon && p.y < height) {
-      ctx.fillStyle = onPath ? 'rgba(255,246,205,0.4)' : 'rgba(220,245,255,0.18)';
-      ctx.fillRect(p.x, p.y, Math.max(1.5, p.scale * (onPath ? 9 : 6)), 1.4);
+      ctx.fillStyle = onPath ? 'rgba(255,205,130,0.5)' : 'rgba(220,245,255,0.16)';
+      ctx.fillRect(p.x, p.y, Math.max(1.5, p.scale * (onPath ? 11 : 6)), 1.4);
     }
   }
   // Swell: long low bands of light rolling across the water, drawn
@@ -491,8 +534,19 @@ export function drawTerrain(ctx, project, plane) {
         const wx = cell.x + (step * i) / n;
         const wz = cell.z + (step * j) / n;
         const v = samplePoint(wx, wz);
+        // The grid keeps its WORLD corners: the fill below clips
+        // each sub-quad against the near plane in camera space, so
+        // a corner behind the camera cuts the quad at the frame's
+        // edge instead of deleting it — deleting it tore a
+        // sea-coloured gash under the aeroplane on every ground
+        // roll. Depth is only the haze's business; a corner behind
+        // the camera is near by definition, so it takes none.
         const p = project(wx, v.h, wz);
-        pts.push(p ? { x: p.x, y: p.y, depth: p.depth, r: v.r, g: v.g, b: v.b } : null);
+        pts.push({
+          wx, wz, wh: v.h, depth: p ? p.depth : 0,
+          sx: p ? p.x : 0, sy: p ? p.y : 0, clip: !p,
+          r: v.r, g: v.g, b: v.b,
+        });
       }
     }
     // Each sub-quad takes the average of its four lit corners: with
@@ -519,7 +573,6 @@ export function drawTerrain(ctx, project, plane) {
         const b = pts[j * (n + 1) + i + 1];
         const c = pts[(j + 1) * (n + 1) + i + 1];
         const d = pts[(j + 1) * (n + 1) + i];
-        if (!a || !b || !c || !d) continue;
         const ca = hazed(a);
         const cb = hazed(b);
         const cc = hazed(c);
@@ -529,19 +582,45 @@ export function drawTerrain(ctx, project, plane) {
         // projected neighbours land on fractional pixels, and an
         // exact fit leaves hairline seams that print the mesh onto
         // flat ground like graph paper. The whisker of overlap is
-        // invisible; the seams were not.
-        const cx = (a.x + b.x + c.x + d.x) / 4;
-        const cy = (a.y + b.y + c.y + d.y) / 4;
-        const grow = (p) => {
-          const dx = p.x - cx;
-          const dy = p.y - cy;
+        // invisible; the seams were not. The common case paints the
+        // four projected corners directly, allocation-free; only a
+        // quad straddling the camera plane — a handful per frame,
+        // all of them under the aeroplane — pays for the
+        // camera-space clip.
+        if (a.clip || b.clip || c.clip || d.clip) {
+          const poly = project.clipPolygon([
+            { x: a.wx, y: a.wh, z: a.wz },
+            { x: b.wx, y: b.wh, z: b.wz },
+            { x: c.wx, y: c.wh, z: c.wz },
+            { x: d.wx, y: d.wh, z: d.wz },
+          ]);
+          if (!poly) continue;
+          const pcx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+          const pcy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+          ctx.beginPath();
+          poly.forEach((p, idx) => {
+            const dx = p.x - pcx;
+            const dy = p.y - pcy;
+            const len = Math.hypot(dx, dy) || 1;
+            if (idx) ctx.lineTo(p.x + (dx / len) * 0.7, p.y + (dy / len) * 0.7);
+            else ctx.moveTo(p.x + (dx / len) * 0.7, p.y + (dy / len) * 0.7);
+          });
+          ctx.closePath();
+          ctx.fill();
+          continue;
+        }
+        const cx = (a.sx + b.sx + c.sx + d.sx) / 4;
+        const cy = (a.sy + b.sy + c.sy + d.sy) / 4;
+        const grow = (sx, sy) => {
+          const dx = sx - cx;
+          const dy = sy - cy;
           const len = Math.hypot(dx, dy) || 1;
-          return [p.x + (dx / len) * 0.7, p.y + (dy / len) * 0.7];
+          return [sx + (dx / len) * 0.7, sy + (dy / len) * 0.7];
         };
-        const [ax, ay] = grow(a);
-        const [bx, by] = grow(b);
-        const [qx, qy] = grow(c);
-        const [dx2, dy2] = grow(d);
+        const [ax, ay] = grow(a.sx, a.sy);
+        const [bx, by] = grow(b.sx, b.sy);
+        const [qx, qy] = grow(c.sx, c.sy);
+        const [dx2, dy2] = grow(d.sx, d.sy);
         ctx.beginPath();
         ctx.moveTo(ax, ay);
         ctx.lineTo(bx, by);
@@ -593,11 +672,12 @@ function drawCellTrees(ctx, project, cell, kind, steep) {
   }
 }
 
-// A pine: a dark cone with a sun-lit shoulder and a cast shadow fleck.
+// A pine: a dark cone with a sun-lit shoulder and, at golden hour,
+// a long shadow fleck thrown west of its trunk.
 function drawPineTree(ctx, foot, w, hh) {
   ctx.fillStyle = 'rgba(16,40,20,0.35)';
   ctx.beginPath();
-  ctx.ellipse(foot.x + w * 0.5, foot.y, w * 0.9, w * 0.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(foot.x - w * 0.62, foot.y, w * 1.55, w * 0.3, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = PALETTE.treeDark;
   ctx.beginPath();
@@ -638,10 +718,10 @@ const CANOPY_PUFFS = [
 function drawBroadleafTree(ctx, foot, w, hh, jitter) {
   const crownR = w * 1.05 * jitter;
   const crownY = foot.y - hh * 0.72;
-  // Soft ground shadow, thrown away from the sun.
+  // Soft ground shadow, thrown long away from the low sun.
   ctx.fillStyle = 'rgba(16,40,20,0.32)';
   ctx.beginPath();
-  ctx.ellipse(foot.x - crownR * 0.18, foot.y, crownR * 0.95, crownR * 0.26, 0, 0, Math.PI * 2);
+  ctx.ellipse(foot.x - crownR * 0.58, foot.y, crownR * 1.45, crownR * 0.27, 0, 0, Math.PI * 2);
   ctx.fill();
   // Trunk: a tapered post, its shaded side a step darker, splitting
   // into two branch strokes that reach into the crown's lower puffs.
@@ -750,15 +830,15 @@ export function drawRunways(ctx, project) {
     for (let sgm = 0; sgm < SEGMENTS; sgm++) {
       const a0 = -hl + (runway.length / SEGMENTS) * sgm;
       const a1 = -hl + (runway.length / SEGMENTS) * (sgm + 1);
-      const corners = [
-        [runway.x + fx * a0 - px * hw, runway.z + fz * a0 - pz * hw],
-        [runway.x + fx * a0 + px * hw, runway.z + fz * a0 + pz * hw],
-        [runway.x + fx * a1 + px * hw, runway.z + fz * a1 + pz * hw],
-        [runway.x + fx * a1 - px * hw, runway.z + fz * a1 - pz * hw],
-      ].map(([x, z]) => project(x, runway.altitude + 0.4, z));
-      if (corners.some((p) => !p)) continue;
+      const poly = project.clipPolygon([
+        { x: runway.x + fx * a0 - px * hw, y: runway.altitude + 0.4, z: runway.z + fz * a0 - pz * hw },
+        { x: runway.x + fx * a0 + px * hw, y: runway.altitude + 0.4, z: runway.z + fz * a0 + pz * hw },
+        { x: runway.x + fx * a1 + px * hw, y: runway.altitude + 0.4, z: runway.z + fz * a1 + pz * hw },
+        { x: runway.x + fx * a1 - px * hw, y: runway.altitude + 0.4, z: runway.z + fz * a1 - pz * hw },
+      ]);
+      if (!poly) continue;
       ctx.beginPath();
-      corners.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
       ctx.closePath();
       ctx.fill();
     }
@@ -858,6 +938,20 @@ export function drawTown(ctx, project, plane) {
     if (t.some((p) => !p)) continue;
     const b = [corner(-hw, -hd, base), corner(hw, -hd, base), corner(hw, hd, base), corner(-hw, hd, base)];
     if (b.some((p) => !p)) continue;
+    // The golden-hour shadow: the whole footprint thrown west and a
+    // step south by the low sun, longer than the house is tall — it
+    // grounds every block on its street instead of floating it.
+    const sh = [0, 1, 2, 3].map((i) => project(
+      block.x + (i === 1 || i === 2 ? hw : -hw) * c - (i >= 2 ? hd : -hd) * s - block.h * 1.05,
+      base + 0.3,
+      block.z + (i === 1 || i === 2 ? hw : -hw) * s + (i >= 2 ? hd : -hd) * c + block.h * 0.6));
+    if (!sh.some((p) => !p)) {
+      ctx.fillStyle = 'rgba(24,30,26,0.26)';
+      ctx.beginPath();
+      sh.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fill();
+    }
     // Walls shaded by their facing against SUN_DIR: the two sunward
     // faces glow cream, the lee faces sit a tone down — the town stops
     // reading as flat cut-outs and starts reading as streets of houses.
@@ -872,14 +966,17 @@ export function drawTown(ctx, project, plane) {
       ctx.lineTo(t[i].x, t[i].y);
       ctx.closePath();
       ctx.fill();
-      // Windows: two rows of lit panes on faces wide enough to carry
-      // them, skipped the moment a house is too far to read.
+      // Windows: two rows of panes on faces wide enough to carry
+      // them, skipped the moment a house is too far to read. At
+      // golden hour half the town has its lamps on: panes alternate
+      // warm-lit amber and dark glass by the house's own hash.
       const faceW = Math.hypot(t[j].x - t[i].x, t[j].y - t[i].y);
       const faceH = Math.hypot(b[i].x - t[i].x, b[i].y - t[i].y);
       if (faceW > 26 && faceH > 9) {
-        ctx.fillStyle = 'rgba(70,90,110,0.85)';
         for (const fy of [0.34, 0.68]) {
           for (const fxn of [0.26, 0.55, 0.8]) {
+            const lit = cellHash(Math.round(block.x + fxn * 91 + i * 7), Math.round(block.z + fy * 57)) > 0.45;
+            ctx.fillStyle = lit ? 'rgba(255,183,92,0.92)' : 'rgba(58,72,88,0.85)';
             const wx = t[i].x + (t[j].x - t[i].x) * fxn + (b[i].x - t[i].x) * fy;
             const wy = t[i].y + (t[j].y - t[i].y) * fxn + (b[i].y - t[i].y) * fy;
             ctx.fillRect(wx - 1.3, wy - 1.6, 2.6, 3.2);
@@ -938,6 +1035,34 @@ export function drawLandmarks(ctx, project) {
       ctx.lineTo(foot.x + (head.x - foot.x) * f1, foot.y + (head.y - foot.y) * f1);
       ctx.stroke();
     }
+    // At golden hour the lamp is lit: a warm halo round the head and
+    // a long translucent beam laid out over the water it guards —
+    // Gull Rock's sweeps the strait south-east, Porto Lume's points
+    // out to sea south of the harbour.
+    const beamDir = mark.name.includes('GULL') ? [0.66, 0.75] : [0.1, 1];
+    const bl = 420;
+    const bx = mark.x + beamDir[0] * bl;
+    const bz = mark.z + beamDir[1] * bl;
+    const perp = [-beamDir[1], beamDir[0]];
+    const beamPts = [
+      head,
+      project(bx + perp[0] * 46, base + mark.height * 0.82, bz + perp[1] * 46),
+      project(bx - perp[0] * 46, base + mark.height * 0.82, bz - perp[1] * 46),
+    ];
+    if (!beamPts.some((p) => !p)) {
+      ctx.fillStyle = 'rgba(255,205,120,0.10)';
+      ctx.beginPath();
+      beamPts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+      ctx.closePath();
+      ctx.fill();
+    }
+    const halo = ctx.createRadialGradient(head.x, head.y, 1, head.x, head.y, Math.max(7, foot.scale * 15));
+    halo.addColorStop(0, 'rgba(255,205,120,0.5)');
+    halo.addColorStop(1, 'rgba(255,205,120,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, Math.max(7, foot.scale * 15), 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = PALETTE.lampAmber;
     ctx.beginPath();
     ctx.arc(head.x, head.y, Math.max(1.8, foot.scale * 3), 0, Math.PI * 2);
@@ -993,11 +1118,11 @@ export function drawClouds(ctx, project, plane, t) {
     if (!p) continue;
     const r = Math.max(6, p.scale * 88);
     const lobes = 3 + (i % 3);
-    ctx.fillStyle = 'rgba(148,172,198,0.5)';
+    ctx.fillStyle = 'rgba(146,128,124,0.5)';
     ctx.beginPath();
     ctx.ellipse(p.x, p.y + r * 0.16, r * 1.05, r * 0.3, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillStyle = 'rgba(255,244,230,0.9)';
     for (let l = 0; l < lobes; l++) {
       const off = (l / (lobes - 1) - 0.5) * 1.5;
       const lr = r * (0.62 - Math.abs(off) * 0.22);
@@ -1005,9 +1130,315 @@ export function drawClouds(ctx, project, plane, t) {
       ctx.ellipse(p.x + off * r, p.y - Math.abs(off) * r * 0.05 + (l % 2) * r * 0.05, lr, lr * 0.52, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.fillStyle = 'rgba(255,252,240,0.75)';
+    // The cap catches the low sun: a wide, flat amber wash laid
+    // across the top — kept broad and soft, because a tight round
+    // cap reads as a yolk on a fried egg, not as light.
+    ctx.fillStyle = 'rgba(255,196,120,0.5)';
     ctx.beginPath();
-    ctx.ellipse(p.x + r * 0.28, p.y - r * 0.16, r * 0.4, r * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x + r * 0.3, p.y - r * 0.15, r * 0.55, r * 0.11, 0, 0, Math.PI * 2);
     ctx.fill();
+  }
+  // A skein of gulls working the strait off Home Isle: six birds in
+  // a loose vee, wings beating slow — the smallest moving thing in
+  // the sky, and the one that makes the air feel inhabited.
+  const flockX = 700 + Math.sin(t * 0.05) * 30;
+  const flockY = 235 + Math.sin(t * 0.4) * 4;
+  const flockZ = 820;
+  ctx.strokeStyle = 'rgba(28,38,48,0.8)';
+  ctx.lineWidth = 1.4;
+  for (let bIdx = 0; bIdx < 6; bIdx++) {
+    const row = Math.ceil(bIdx / 2);
+    const sideB = bIdx === 0 ? 0 : bIdx % 2 ? 1 : -1;
+    const bp = project(
+      flockX + sideB * row * 16,
+      flockY - row * 2.5,
+      flockZ + row * 13);
+    if (!bp) continue;
+    const wHalf = Math.max(1.8, bp.scale * 4.4);
+    const flap = Math.sin(t * 6 + bIdx * 1.3) * wHalf * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(bp.x - wHalf, bp.y - flap);
+    ctx.lineTo(bp.x, bp.y + Math.abs(flap) * 0.25);
+    ctx.lineTo(bp.x + wHalf, bp.y - flap);
+    ctx.stroke();
+  }
+}
+
+// --- The built world: bridge, boats, road and falls (v6) ---
+// Landmarks a pilot navigates by and a screenshot remembers: the
+// ferry bridge to Pilot Islet, working boats on the sea lanes, the
+// harbour road at Porto Lume, and the falls on Mount Vela's face.
+
+// One projected quad, the brick every feature below is built from.
+// Corners are [x, y, z] world triples; a corner behind the camera
+// kills the quad quietly.
+function featureQuad(ctx, project, corners, fill) {
+  const pts = corners.map(([x, y, z]) => project(x, y, z));
+  if (pts.some((p) => !p)) return;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.fill();
+}
+
+// The Pilot Islet bridge: a suspension span across the strait
+// from Home Isle's north-east shore to the islet — two towers, a
+// sagging main cable each side, hangers, and a lamp-lit deck. The
+// towers and cables carry the read: a suspension silhouette says
+// "bridge" at any range and any angle, where a bare deck seen
+// end-on collapses into a pole.
+export function drawBridge(ctx, project) {
+  const A = { x: 628, z: 921 };   // Home Isle shore
+  const B = { x: 1115, z: 317 };  // Pilot Islet shore
+  const dx = B.x - A.x;
+  const dz = B.z - A.z;
+  const len = Math.hypot(dx, dz);
+  const ux = dx / len;
+  const uz = dz / len;
+  const px = -uz; // deck's left-right axis
+  const pz = ux;
+  const HW = 5.5; // half deck width
+  const deckY = (t) => 13 + Math.sin(t * Math.PI) * 2.5;
+  const SEG = 16;
+  for (let sgm = 0; sgm < SEG; sgm++) {
+    const t0 = sgm / SEG;
+    const t1 = (sgm + 1) / SEG;
+    const c0 = { x: A.x + dx * t0, z: A.z + dz * t0 };
+    const c1 = { x: A.x + dx * t1, z: A.z + dz * t1 };
+    // The skirt first (the deck's shadowed south face), then the deck.
+    featureQuad(ctx, project, [
+      [c0.x + px * HW, deckY(t0), c0.z + pz * HW],
+      [c1.x + px * HW, deckY(t1), c1.z + pz * HW],
+      [c1.x + px * HW, deckY(t1) - 1.6, c1.z + pz * HW],
+      [c0.x + px * HW, deckY(t0) - 1.6, c0.z + pz * HW],
+    ], '#5d4f40');
+    featureQuad(ctx, project, [
+      [c0.x - px * HW, deckY(t0), c0.z - pz * HW],
+      [c0.x + px * HW, deckY(t0), c0.z + pz * HW],
+      [c1.x + px * HW, deckY(t1), c1.z + pz * HW],
+      [c1.x - px * HW, deckY(t1), c1.z - pz * HW],
+    ], '#8a755c');
+    // A pale centreline the deck wears like a road.
+    featureQuad(ctx, project, [
+      [c0.x - px * 0.5, deckY(t0) + 0.06, c0.z - pz * 0.5],
+      [c0.x + px * 0.5, deckY(t0) + 0.06, c0.z + pz * 0.5],
+      [c1.x + px * 0.5, deckY(t1) + 0.06, c1.z + pz * 0.5],
+      [c1.x - px * 0.5, deckY(t1) + 0.06, c1.z - pz * 0.5],
+    ], 'rgba(245,240,220,0.5)');
+  }
+  // Pylons: two concrete legs standing in the strait.
+  for (const tp of [0.34, 0.67]) {
+    const cxp = A.x + dx * tp;
+    const czp = A.z + dz * tp;
+    const topY = deckY(tp) - 1.2;
+    featureQuad(ctx, project, [
+      [cxp - px * 3.4, topY, czp - pz * 3.4],
+      [cxp + px * 3.4, topY, czp + pz * 3.4],
+      [cxp + px * 4.4, -6, czp + pz * 4.4],
+      [cxp - px * 4.4, -6, czp - pz * 4.4],
+    ], '#6d5f4d');
+  }
+  // The suspension work: twin towers at the third points rising
+  // seventeen metres over the deck, a crossbar between each pair of
+  // posts, the main cables sagging tower to tower, and hangers
+  // dropping from cable to deck — the silhouette that reads as a
+  // bridge from a mile out.
+  const T1 = 0.24;
+  const T2 = 0.74;
+  const towerTop = (tp) => deckY(tp) + 21;
+  const cableKeys = [
+    [0, deckY(0) + 1.5], [T1, towerTop(T1)], [0.5, deckY(0.5) + 3.2],
+    [T2, towerTop(T2)], [1, deckY(1) + 1.5],
+  ];
+  const cableY = (t) => {
+    for (let k = 0; k < cableKeys.length - 1; k++) {
+      const [tA, yA] = cableKeys[k];
+      const [tB, yB] = cableKeys[k + 1];
+      if (t >= tA && t <= tB) return yA + ((yB - yA) * (t - tA)) / (tB - tA);
+    }
+    return deckY(t) + 3;
+  };
+  for (const tp of [T1, T2]) {
+    const cxp = A.x + dx * tp;
+    const czp = A.z + dz * tp;
+    for (const sideT of [-1, 1]) {
+      featureQuad(ctx, project, [
+        [cxp + px * HW * sideT - ux * 1.1, towerTop(tp), czp + pz * HW * sideT - uz * 1.1],
+        [cxp + px * HW * sideT + ux * 1.1, towerTop(tp), czp + pz * HW * sideT + uz * 1.1],
+        [cxp + px * HW * sideT + ux * 1.1, deckY(tp) - 2, czp + pz * HW * sideT + uz * 1.1],
+        [cxp + px * HW * sideT - ux * 1.1, deckY(tp) - 2, czp + pz * HW * sideT - uz * 1.1],
+      ], '#7d6c55');
+    }
+    featureQuad(ctx, project, [
+      [cxp - px * HW - ux * 1.1, towerTop(tp) - 2.2, czp - pz * HW - uz * 1.1],
+      [cxp + px * HW + ux * 1.1, towerTop(tp) - 2.2, czp + pz * HW + uz * 1.1],
+      [cxp + px * HW + ux * 1.1, towerTop(tp) - 4.4, czp + pz * HW + uz * 1.1],
+      [cxp - px * HW - ux * 1.1, towerTop(tp) - 4.4, czp - pz * HW - uz * 1.1],
+    ], '#6d5f4d');
+    // A second, lower crossbar: two bars make a portal frame, and a
+    // portal frame reads as a bridge tower even seen dead end-on —
+    // the view the Ring Run's chase camera actually gets.
+    featureQuad(ctx, project, [
+      [cxp - px * HW - ux * 1.1, deckY(tp) + 7.2, czp - pz * HW - uz * 1.1],
+      [cxp + px * HW + ux * 1.1, deckY(tp) + 7.2, czp + pz * HW + uz * 1.1],
+      [cxp + px * HW + ux * 1.1, deckY(tp) + 5.2, czp + pz * HW + uz * 1.1],
+      [cxp - px * HW - ux * 1.1, deckY(tp) + 5.2, czp - pz * HW - uz * 1.1],
+    ], '#6d5f4d');
+  }
+  for (const sideC of [-1, 1]) {
+    const off = HW * 0.92 * sideC;
+    ctx.strokeStyle = 'rgba(38,36,34,0.85)';
+    let cablePts = null;
+    let midScale = 1;
+    for (let sgm = 0; sgm <= 20; sgm++) {
+      const t = sgm / 20;
+      const p = project(A.x + dx * t + px * off, cableY(t), A.z + dz * t + pz * off);
+      if (!p) { cablePts = null; continue; }
+      if (sgm === 10) midScale = p.scale;
+      if (!cablePts) {
+        cablePts = [];
+        ctx.lineWidth = Math.max(1, p.scale * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+      } else {
+        ctx.lineTo(p.x, p.y);
+      }
+      cablePts.push(p);
+    }
+    if (cablePts && cablePts.length > 1) ctx.stroke();
+    // Hangers: a vertical thread every eighth of the span.
+    ctx.lineWidth = Math.max(0.7, midScale * 0.22);
+    for (let hIdx = 1; hIdx < 8; hIdx++) {
+      const t = hIdx / 8;
+      const pTop = project(A.x + dx * t + px * off, cableY(t), A.z + dz * t + pz * off);
+      const pBot = project(A.x + dx * t + px * off, deckY(t), A.z + dz * t + pz * off);
+      if (!pTop || !pBot) continue;
+      ctx.beginPath();
+      ctx.moveTo(pTop.x, pTop.y);
+      ctx.lineTo(pBot.x, pBot.y);
+      ctx.stroke();
+    }
+  }
+  // Rail lamps: a warm bead every forty metres, lit for the evening.
+  ctx.fillStyle = PALETTE.lampAmber;
+  for (let sgm = 0; sgm <= SEG; sgm++) {
+    const t = sgm / SEG;
+    for (const sideLamp of [-1, 1]) {
+      const p = project(
+        A.x + dx * t + px * HW * sideLamp, deckY(t) + 1.6,
+        A.z + dz * t + pz * HW * sideLamp);
+      if (!p) continue;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(1.1, p.scale * 1.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// Working boats: a ferry crossing for Porto Lume, a sailboat beating
+// up the strait in the cover's view, and a fishing boat off the
+// harbour mouth. Hull, cabin and a wake that fans out astern — at
+// golden hour the sails and the wake do the talking.
+const BOATS = [
+  { x: 2050, z: 1650, heading: 55, len: 26, sail: false, name: 'lume ferry' },
+  { x: 1050, z: 800, heading: 150, len: 13, sail: true, name: 'strait sailboat' },
+  { x: 2620, z: 2820, heading: 205, len: 15, sail: false, name: 'harbour fishing boat' },
+];
+
+export function drawBoats(ctx, project) {
+  for (const boat of BOATS) {
+    const rad = (boat.heading * Math.PI) / 180;
+    const fx = Math.sin(rad);
+    const fz = -Math.cos(rad);
+    const px = fz;
+    const pz = -fx;
+    const L = boat.len;
+    const Wd = L * 0.3;
+    const at = (along, across, y) => [
+      boat.x + fx * along + px * across, y, boat.z + fz * along + pz * across,
+    ];
+    // The wake first, under everything: a pale fan astern that
+    // widens and fades as it trails.
+    featureQuad(ctx, project, [
+      at(-L * 0.5, -Wd * 0.32, 0.25), at(-L * 0.5, Wd * 0.32, 0.25),
+      at(-L * 2.8, Wd * 1.5, 0.25), at(-L * 2.8, -Wd * 1.5, 0.25),
+    ], 'rgba(238,248,250,0.2)');
+    featureQuad(ctx, project, [
+      at(-L * 0.5, -Wd * 0.1, 0.28), at(-L * 0.5, Wd * 0.1, 0.28),
+      at(-L * 2.2, Wd * 0.42, 0.28), at(-L * 2.2, -Wd * 0.42, 0.28),
+    ], 'rgba(250,253,255,0.32)');
+    // Hull: a sun-side wall, a shade-side wall and the deck between.
+    featureQuad(ctx, project, [
+      at(-L * 0.5, -Wd / 2, 1.7), at(L * 0.32, -Wd / 2, 1.7),
+      at(L * 0.52, 0, 1.15), at(-L * 0.5, -Wd * 0.2, 0.4),
+    ], '#7a3b2a');
+    featureQuad(ctx, project, [
+      at(-L * 0.5, Wd / 2, 1.7), at(L * 0.32, Wd / 2, 1.7),
+      at(L * 0.52, 0, 1.15), at(-L * 0.5, Wd * 0.2, 0.4),
+    ], '#93502f');
+    featureQuad(ctx, project, [
+      at(-L * 0.5, -Wd / 2, 1.7), at(-L * 0.5, Wd / 2, 1.7),
+      at(L * 0.32, Wd / 2, 1.7), at(L * 0.32, -Wd / 2, 1.7),
+    ], '#e8e2d2');
+    if (boat.sail) {
+      // Mast and two sails, cream canvas lit warm — a triangle you
+      // can read from across the strait.
+      const mastTop = at(L * 0.05, 0, L * 1.15);
+      const mastFoot = at(L * 0.05, 0, 1.7);
+      const boomEnd = at(-L * 0.42, 0, 2.4);
+      const jibFoot = at(L * 0.46, 0, 1.9);
+      featureQuad(ctx, project, [mastTop, mastFoot, boomEnd, boomEnd], '#fdf6e0');
+      featureQuad(ctx, project, [mastTop, mastFoot, jibFoot, jibFoot], '#f3e8cc');
+      const mp = [mastFoot, mastTop].map(([x, y, z]) => project(x, y, z));
+      if (!mp.some((p) => !p)) {
+        ctx.strokeStyle = '#4c3d28';
+        ctx.lineWidth = Math.max(1, mp[0].scale * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(mp[0].x, mp[0].y);
+        ctx.lineTo(mp[1].x, mp[1].y);
+        ctx.stroke();
+      }
+    } else {
+      // Wheelhouse: a white block with a dark window band and a
+      // warm lamp on its roof.
+      featureQuad(ctx, project, [
+        at(-L * 0.28, -Wd * 0.3, 4.6), at(-L * 0.28, Wd * 0.3, 4.6),
+        at(L * 0.08, Wd * 0.3, 4.6), at(L * 0.08, -Wd * 0.3, 4.6),
+      ], '#eef0ea');
+      featureQuad(ctx, project, [
+        at(-L * 0.28, Wd * 0.3, 4.6), at(-L * 0.28, Wd * 0.3, 2.1),
+        at(L * 0.08, Wd * 0.3, 2.1), at(L * 0.08, Wd * 0.3, 4.6),
+      ], '#dfe3da');
+      featureQuad(ctx, project, [
+        at(-L * 0.28, -Wd * 0.3, 4.6), at(-L * 0.28, -Wd * 0.3, 2.1),
+        at(L * 0.08, -Wd * 0.3, 2.1), at(L * 0.08, -Wd * 0.3, 4.6),
+      ], '#c9cdc2');
+      featureQuad(ctx, project, [
+        at(-L * 0.26, Wd * 0.31, 4.1), at(-L * 0.26, Wd * 0.31, 3.3),
+        at(L * 0.06, Wd * 0.31, 3.3), at(L * 0.06, Wd * 0.31, 4.1),
+      ], 'rgba(38,52,66,0.9)');
+    }
+  }
+}
+
+// The harbour road: a dirt ribbon climbing from Porto Lume's streets
+// to the strip's south threshold — the line every approach crosses
+// on short final, tying the town to its aeroplanes.
+export function drawHarbourRoad(ctx, project) {
+  const X = 2578;
+  const Z0 = 2620;
+  const Z1 = 2935;
+  const HW = 4.6;
+  const SEG = 8;
+  for (let sgm = 0; sgm < SEG; sgm++) {
+    const zA = Z0 + ((Z1 - Z0) * sgm) / SEG;
+    const zB = Z0 + ((Z1 - Z0) * (sgm + 1)) / SEG;
+    featureQuad(ctx, project, [
+      [X - HW, groundHeight(X - HW, zA) + 0.35, zA],
+      [X + HW, groundHeight(X + HW, zA) + 0.35, zA],
+      [X + HW, groundHeight(X + HW, zB) + 0.35, zB],
+      [X - HW, groundHeight(X - HW, zB) + 0.35, zB],
+    ], sgm % 2 ? '#b3986a' : '#bb9f70');
   }
 }

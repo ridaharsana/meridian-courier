@@ -21,6 +21,10 @@ export const ISLANDS = [
   { name: 'PORTO LUME', x: 2500, z: 2300, radius: 780, peak: 118, town: true },
   { name: 'GULL ROCK', x: -1700, z: -1900, radius: 470, peak: 66, town: false },
   { name: 'FARREL SHOAL', x: 700, z: -2700, radius: 560, peak: 74, town: false },
+  // A low islet in the strait north-east of Home Isle, close enough
+  // that the ferry road bridges to it: the archipelago's one bridge,
+  // and the first landmark a Ring Run pilot passes on the course.
+  { name: 'PILOT ISLET', x: 1250, z: 150, radius: 300, peak: 34, town: false },
 ];
 
 // Runway plateaus: centre, heading of the strip (degrees, direction of travel
@@ -45,26 +49,30 @@ export const AIRCRAFT = {
 };
 
 export const PALETTE = {
-  skyTop: '#1f5fa8',
-  skyMid: '#6ea9dc',
-  skyLow: '#f2e3ba',
-  sun: '#fff3c4',
-  sunCore: '#fffbe8',
-  sea: '#1d6f8e',
-  seaDeep: '#124e6a',
-  seaShallow: '#3a97a8',
+  // Golden hour (v6): the whole chart is graded late-afternoon — a
+  // deep blue zenith over a warm amber horizon, a low warm sun, and
+  // every surface tone below warmed a step toward it, so the four
+  // screenshots read as one hour of one day.
+  skyTop: '#26457e',
+  skyMid: '#7e9cc0',
+  skyLow: '#f8c47c',
+  sun: '#ffd9a3',
+  sunCore: '#fff3da',
+  sea: '#1a637f',
+  seaDeep: '#0f435c',
+  seaShallow: '#4599a4',
   // The de-boxed shore: the underwater shelf falls from a pale
   // turquoise lip through a mid shelf tone to the deep floor colour,
   // and the beach itself runs wet → dry with a soft foam edge.
-  seaShelf: '#2f8aa5',
-  seaFloor: '#155e7d',
-  sand: '#e6d194',
-  sandDry: '#eed9a0',
-  sandWet: '#cbb37e',
-  foam: '#f8f4e4',
-  grassLow: '#79a95c',
-  grassHigh: '#4d7d43',
-  scrub: '#5d8a4c',
+  seaShelf: '#2f869e',
+  seaFloor: '#145a76',
+  sand: '#eecf92',
+  sandDry: '#f4d99b',
+  sandWet: '#d3af7d',
+  foam: '#faf0da',
+  grassLow: '#8ba85e',
+  grassHigh: '#527a3e',
+  scrub: '#648347',
   // The worked lowlands: crop tones a pilot reads as farmland from
   // pattern altitude — ripe wheat, young crop, deep pasture, fresh
   // plough and pale fallow — fenced by dark hedgerows and crossed by
@@ -77,9 +85,10 @@ export const PALETTE = {
   hedge: '#33512e',
   dirt: '#b3986a',
   // Distance haze: far ground, far sea and the horizon itself all
-  // lean toward this one pale blue, so the world dissolves into the
-  // sky instead of ending at a drawn line.
-  haze: '#bcd6e4',
+  // lean toward this one warm pale tone — golden-hour air is dusty,
+  // not blue — so the world dissolves into the lit sky instead of
+  // ending at a drawn line.
+  haze: '#d8c39a',
   treeDark: '#2e5d33',
   treeLight: '#4c8148',
   // Broadleaf tones, taken from a real park tree's crown: a grey-brown
@@ -89,12 +98,12 @@ export const PALETTE = {
   trunkShade: '#463727',
   leafDark: '#27512a',
   leafMid: '#4b8a38',
-  leafLit: '#86c34a',
-  leafBright: '#b5dd6a',
-  rock: '#8d8578',
-  rockDark: '#6d675c',
-  snow: '#f4f7f5',
-  snowShade: '#cfdde8',
+  leafLit: '#93c248',
+  leafBright: '#cfe06a',
+  rock: '#96826d',
+  rockDark: '#71604e',
+  snow: '#fdf1dc',
+  snowShade: '#e3cdb4',
   runway: '#4a4d52',
   runwayLine: '#f5f2e6',
   townWall: '#e8dcc3',

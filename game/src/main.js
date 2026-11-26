@@ -10,6 +10,7 @@ import { updateMission, nextRing } from './missions.js';
 import {
   createCamera, chaseCamera, cockpitCamera, makeProjector,
   drawSky, drawSea, drawTerrain, drawRunways, drawTown, drawLandmarks, drawRing, drawClouds,
+  drawBridge, drawBoats, drawHarbourRoad,
 } from './renderer-3d.js';
 import { drawChaseAircraft, drawCockpitFrame, drawAircraftShadow } from './aircraft-art.js';
 import { drawInstrumentPanel } from './instruments.js';
@@ -128,6 +129,13 @@ function render(t) {
   drawTown(ctx, project, plane);
   drawRunways(ctx, project);
   drawLandmarks(ctx, project);
+  // The built world of v6: the Pilot Islet bridge, working boats
+  // and the harbour road — the landmarks that make the chart a
+  // place. (A Vela waterfall was tried and cut in QA: at screenshot
+  // range it read as a scratch on the slope, not as water.)
+  drawBridge(ctx, project);
+  drawBoats(ctx, project);
+  drawHarbourRoad(ctx, project);
   // Mission rings, the next one pulsing green.
   const upcoming = nextRing(game.missionState);
   for (const ring of game.missionState.mission.rings) {
@@ -138,7 +146,7 @@ function render(t) {
   if (game.cameraMode === 'cockpit') {
     drawCockpitFrame(ctx, width, height, plane);
   } else {
-    drawChaseAircraft(ctx, plane, width, height, t);
+    drawChaseAircraft(ctx, plane, width, height, t, project, camera);
   }
   drawInstrumentPanel(ctx, plane, width, height, game.cameraMode);
   drawHudDigits(ctx, plane, width, height);

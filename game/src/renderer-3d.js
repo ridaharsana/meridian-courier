@@ -7,9 +7,10 @@
 // always flown; this file turns it into a three.js camera each frame.
 
 import * as THREE from 'three';
-import { WORLD, PALETTE, RUNWAYS } from './config.js';
-import { groundHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
+import { WORLD, PALETTE, RUNWAYS, ISLANDS } from './config.js';
+import { groundHeight, visualHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
 import { buildPetrelAircraft, updatePetrelAircraft } from './aircraft-art.js';
+import { createLifeWorld, updateLifeWorld } from './traffic-and-life.js';
 import { nextRing } from './missions.js';
 import { PARTICLE_KINDS } from './juice-particles.js';
 
@@ -229,7 +230,9 @@ export function buildTerrainMesh(detailTex) {
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i) + TERRAIN_CENTRE.x;
     const z = pos.getZ(i) + TERRAIN_CENTRE.z;
-    pos.setXYZ(i, x, groundHeight(x, z), z);
+    // The mesh wears the visual relief (visualHeight); the flight
+    // model keeps the smooth chart underneath it.
+    pos.setXYZ(i, x, visualHeight(x, z), z);
   }
   geo.computeVertexNormals();
   const normals = geo.attributes.normal;
@@ -344,7 +347,7 @@ export function buildTown(group) {
   const chimneyMat = new THREE.MeshStandardMaterial({ color: 0x9a8d7c, roughness: 0.9 });
   for (const b of TOWN_BLOCKS) {
     const house = new THREE.Group();
-    const base = groundHeight(b.x, b.z);
+    const base = visualHeight(b.x, b.z);
     const walls = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), wallMats[b.wall % wallMats.length]);
     walls.position.y = b.h / 2 - 0.6;
     walls.castShadow = true;
@@ -382,10 +385,10 @@ export function buildForest(group) {
     guard++;
     const x = -3200 + rng() * 7200;
     const z = -3400 + rng() * 7200;
-    const h = groundHeight(x, z);
+    const h = visualHeight(x, z);
     if (h < 3 || h > 175) continue;
     if (surfaceKind(x, z, h) === 'runway') continue;
-    const slope = Math.abs(groundHeight(x + 9, z) - h) + Math.abs(groundHeight(x, z + 9) - h);
+    const slope = Math.abs(visualHeight(x + 9, z) - h) + Math.abs(visualHeight(x, z + 9) - h);
     if (slope > 9) continue;
     spots.push({ x, z, h, s: 1.0 + rng() * 2.1, tone: rng() });
   }
@@ -421,6 +424,99 @@ export function buildForest(group) {
   canopies.castShadow = true;
   group.add(trunks);
   group.add(canopies);
+}
+
+// Rock outcrops: grey teeth wherever the relieved hillside runs
+// steep — a few hundred instanced icosahedra seated into the slope.
+export function buildRockOutcrops(group) {
+  const rng = makeRng(5150);
+  const spots = [];
+  let guard = 0;
+  while (spots.length < 340 && guard < 30000) {
+    guard++;
+    const x = -3200 + rng() * 7200;
+    const z = -3400 + rng() * 7200;
+    const h = visualHeight(x, z);
+    if (h < 8) continue;
+    const slope = Math.abs(visualHeight(x + 12, z) - h) + Math.abs(visualHeight(x, z + 12) - h);
+    if (slope < 7) continue;
+    if (surfaceKind(x, z, h) === 'runway') continue;
+    // Keep the strips' shoulders clear: no boulders looming over a
+    // runway the player is trying to land on.
+    if (RUNWAYS.some((r) => Math.hypot(x - r.x, z - r.z) < 430)) continue;
+    spots.push({
+      x, z, h, s: 0.8 + rng() * 2.6,
+      rx: rng() * 3, ry: rng() * 3, rz: rng() * 3, tone: rng(),
+    });
+  }
+  const geo = new THREE.IcosahedronGeometry(2.4, 0);
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 });
+  const rocks = new THREE.InstancedMesh(geo, mat, spots.length);
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const eul = new THREE.Euler();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const tone = new THREE.Color();
+  const dark = hexColor(PALETTE.rockDark);
+  const lit = hexColor(PALETTE.rock);
+  spots.forEach((r, i) => {
+    pos.set(r.x, r.h + 0.4, r.z);
+    eul.set(r.rx, r.ry, r.rz);
+    q.setFromEuler(eul);
+    scl.set(r.s * 1.25, r.s * 0.8, r.s);
+    m4.compose(pos, q, scl);
+    rocks.setMatrixAt(i, m4);
+    tone.copy(dark).lerp(lit, r.tone);
+    rocks.setColorAt(i, tone);
+  });
+  rocks.instanceMatrix.needsUpdate = true;
+  if (rocks.instanceColor) rocks.instanceColor.needsUpdate = true;
+  rocks.castShadow = true;
+  group.add(rocks);
+}
+
+// Shoreline foam: a pale ribbon riding each island's waterline,
+// its edge found by bisecting the heightfield for the h ≈ 0.4
+// contour, ray by ray, so the wobble of the chart becomes the
+// wobble of the surf line. It floats a breath above the water and
+// never z-fights it.
+export function buildFoamRings(group) {
+  const mat = new THREE.MeshBasicMaterial({
+    color: hexColor(PALETTE.foam), transparent: true, opacity: 0.5, depthWrite: false,
+  });
+  for (const island of ISLANDS) {
+    const STEPS = 90;
+    const positions = [];
+    const indices = [];
+    for (let i = 0; i <= STEPS; i++) {
+      const a = (i / STEPS) * Math.PI * 2;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      let lo = island.radius * 0.2;
+      let hi = island.radius * 1.5;
+      for (let it = 0; it < 18; it++) {
+        const mid = (lo + hi) / 2;
+        if (groundHeight(island.x + ca * mid, island.z + sa * mid) > 0.4) lo = mid;
+        else hi = mid;
+      }
+      const r = (lo + hi) / 2;
+      positions.push(
+        island.x + ca * (r - 7), 0.32, island.z + sa * (r - 7),
+        island.x + ca * (r + 9), 0.32, island.z + sa * (r + 9),
+      );
+      if (i < STEPS) {
+        const b = i * 2;
+        indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 2;
+    group.add(mesh);
+  }
 }
 
 export function buildBridge(group) {
@@ -656,7 +752,7 @@ export function updateRings(rings, state, t) {
   }
 }
 
-const MAX_POINTS = 260;
+const MAX_POINTS = 512;
 
 export function buildJuicePoints(group, glowTex) {
   const makeSystem = (size, blending, opacity) => {
@@ -678,46 +774,43 @@ export function buildJuicePoints(group, glowTex) {
   const sparks = makeSystem(0.8, THREE.AdditiveBlending, 0.95);
   sparks.points.material.color.set(0xffcd5c);
   const soft = makeSystem(0.55, THREE.NormalBlending, 0.3);
-  return { sparks, soft };
+  // Smoke gets its own system: the puffs are metres wide, not
+  // centimetres, and a point sprite's size is per-system.
+  const smoke = makeSystem(3.4, THREE.NormalBlending, 0.45);
+  return { sparks, soft, smoke };
 }
 
 const KIND_RGB = [
   [1.0, 0.8, 0.36],
   [0.96, 0.98, 1.0],
   [0.86, 0.73, 0.54],
+  [0.97, 0.98, 1.0],
 ];
 
 export function updateJuicePoints(systems, pool) {
-  let si = 0;
-  let oi = 0;
+  const lanes = [
+    { sys: systems.sparks, used: 0 },
+    { sys: systems.soft, used: 0 },
+    { sys: systems.smoke, used: 0 },
+  ];
   for (const p of pool.items) {
     if (!p.alive) continue;
     const f = p.age / p.life;
-    if (p.kind === PARTICLE_KINDS.SPARK) {
-      if (si >= MAX_POINTS) continue;
-      systems.sparks.positions[si * 3] = p.x;
-      systems.sparks.positions[si * 3 + 1] = p.y;
-      systems.sparks.positions[si * 3 + 2] = p.z;
-      const fade = 1 - f * f;
-      systems.sparks.colours[si * 3] = KIND_RGB[0][0] * fade;
-      systems.sparks.colours[si * 3 + 1] = KIND_RGB[0][1] * fade;
-      systems.sparks.colours[si * 3 + 2] = KIND_RGB[0][2] * fade;
-      si++;
-    } else {
-      if (oi >= MAX_POINTS) continue;
-      systems.soft.positions[oi * 3] = p.x;
-      systems.soft.positions[oi * 3 + 1] = p.y;
-      systems.soft.positions[oi * 3 + 2] = p.z;
-      const rgb = KIND_RGB[p.kind];
-      const fade = 1 - f * f;
-      systems.soft.colours[oi * 3] = rgb[0] * fade;
-      systems.soft.colours[oi * 3 + 1] = rgb[1] * fade;
-      systems.soft.colours[oi * 3 + 2] = rgb[2] * fade;
-      oi++;
-    }
+    const lane = p.kind === PARTICLE_KINDS.SPARK ? lanes[0]
+      : p.kind === PARTICLE_KINDS.SMOKE ? lanes[2] : lanes[1];
+    if (lane.used >= MAX_POINTS) continue;
+    const i = lane.used;
+    lane.sys.positions[i * 3] = p.x;
+    lane.sys.positions[i * 3 + 1] = p.y;
+    lane.sys.positions[i * 3 + 2] = p.z;
+    const rgb = KIND_RGB[p.kind];
+    const fade = 1 - f * f;
+    lane.sys.colours[i * 3] = rgb[0] * fade;
+    lane.sys.colours[i * 3 + 1] = rgb[1] * fade;
+    lane.sys.colours[i * 3 + 2] = rgb[2] * fade;
+    lane.used++;
   }
-  for (const sys of [systems.sparks, systems.soft]) {
-    const used = sys === systems.sparks ? si : oi;
+  for (const { sys, used } of lanes) {
     for (let i = used; i < MAX_POINTS; i++) sys.positions[i * 3 + 1] = -9999;
     sys.points.geometry.attributes.position.needsUpdate = true;
     sys.points.geometry.attributes.color.needsUpdate = true;
@@ -816,7 +909,11 @@ export function createWorld(canvas) {
   buildRunways(dressing);
   buildTown(dressing);
   buildForest(dressing);
+  buildRockOutcrops(dressing);
+  buildFoamRings(dressing);
   buildBridge(dressing);
+  world.life = createLifeWorld(makeGlowTexture('rgba(255,190,110,1)', 'rgba(255,150,60,0)'));
+  dressing.add(world.life.group);
   buildLighthouses(dressing, makeGlowTexture('rgba(255,215,150,1)', 'rgba(255,190,110,0)'));
   world.boats = buildBoats(dressing);
   world.rings = buildRings(dressing);
@@ -875,10 +972,11 @@ export function syncWorld(world, game, cameraState, pool, t, dt) {
   world.sun.position.copy(_pos).addScaledVector(SUN, 900);
   world.sun.target.position.set(plane.x, plane.y, plane.z);
 
-  updatePetrelAircraft(world.petrel, plane);
+  updatePetrelAircraft(world.petrel, plane, t);
   world.petrel.group.visible = game.cameraMode !== 'cockpit';
   updateRings(world.rings, game.missionState, t);
   updateBoats(world.boats, t);
+  if (world.life) updateLifeWorld(world.life, t, game.missionState.mission.wind);
   for (const c of world.clouds) {
     c.cluster.position.x += c.speed * dt;
     if (c.cluster.position.x > 5200) c.cluster.position.x = -5200;

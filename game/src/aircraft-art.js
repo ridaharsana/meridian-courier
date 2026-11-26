@@ -32,15 +32,26 @@ function petrelFinTexture() {
 
 // buildPetrelAircraft returns the group plus the parts the frame loop
 // animates: the prop assembly, the blur disc and the gear group.
-export function buildPetrelAircraft() {
+// Options dress the airframe: a livery colour pair (the AI traffic
+// flies a sister ship in steel blue) — the accessories (belly cargo
+// pod, wheel spats, winglets, pitot tube, fin beacon, wingtip
+// strobes) are built on every airframe; the pod shows by flag.
+export function buildPetrelAircraft(options = {}) {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
 
-  const apricot = new THREE.MeshStandardMaterial({ color: APRICOT, roughness: 0.46, metalness: 0.08 });
-  const apricotDeep = new THREE.MeshStandardMaterial({ color: APRICOT_DEEP, roughness: 0.52, metalness: 0.08 });
+  const apricot = new THREE.MeshStandardMaterial({ color: options.colour ?? APRICOT, roughness: 0.46, metalness: 0.08 });
+  const apricotDeep = new THREE.MeshStandardMaterial({ color: options.deepColour ?? APRICOT_DEEP, roughness: 0.52, metalness: 0.08 });
   const umber = new THREE.MeshStandardMaterial({ color: UMBER, roughness: 0.5, metalness: 0.05 });
   const cream = new THREE.MeshStandardMaterial({ color: CREAM, roughness: 0.55, metalness: 0.05 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x8f97a3, roughness: 0.35, metalness: 0.7 });
+  const beaconMat = new THREE.MeshStandardMaterial({
+    color: 0xff3020, emissive: 0xff2010, emissiveIntensity: 0.4,
+  });
+  const strobeMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0,
+  });
 
   // Fuselage: a lathe profile, tail tip first, swelling through the
   // cabin and tapering into the nose. rotateX turns the lathe axis
@@ -62,6 +73,21 @@ export function buildPetrelAircraft() {
     band.position.set(0.8 * sideSign, 0.08, -0.5);
     body.add(band);
   }
+
+  // The belly cargo pod: a faired capsule slung under the fuselage,
+  // fitted for the mail run and shown only when the sortie's plane
+  // flag says so (the renderer poses it from plane.cargoPod).
+  const pod = new THREE.Group();
+  const podBodyGeo = new THREE.CapsuleGeometry(0.52, 1.7, 4, 10);
+  podBodyGeo.rotateX(Math.PI / 2);
+  const podBody = new THREE.Mesh(podBodyGeo, umber);
+  podBody.position.set(0, -0.82, -0.35);
+  pod.add(podBody);
+  const podSkirt = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.34, 2.2), apricotDeep);
+  podSkirt.position.set(0, -0.48, -0.35);
+  pod.add(podSkirt);
+  pod.visible = false;
+  body.add(pod);
 
   // Canopy: a scaled sphere segment in near-black glass — low
   // roughness and high metalness so the sky and sun live in it.
@@ -99,6 +125,25 @@ export function buildPetrelAircraft() {
     );
     lamp.position.set(4.2 * sideSign, 0.14, -0.55);
     body.add(lamp);
+    // Wingtip strobe beside the nav lamp: dark until its double
+    // flash fires (the frame loop drives strobeMat).
+    const strobe = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), strobeMat);
+    strobe.position.set(4.2 * sideSign, 0.3, -0.55);
+    body.add(strobe);
+    // Winglet: a small upturned fence at the tip, in the deep
+    // apricot so its broad shaded face reads as wing, not furniture.
+    const winglet = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.52, 0.66), apricotDeep);
+    winglet.position.set(4.28 * sideSign, 0.34, -0.55);
+    winglet.rotation.z = -0.35 * sideSign;
+    body.add(winglet);
+    // Pitot tube under the port wing only, reaching into clean air.
+    if (sideSign < 0) {
+      const pitotGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.85, 6);
+      pitotGeo.rotateX(Math.PI / 2);
+      const pitot = new THREE.Mesh(pitotGeo, metal);
+      pitot.position.set(-2.3, -0.24, -1.15);
+      body.add(pitot);
+    }
   }
 
   // Tailplane and the fin, which carries the PETREL name.
@@ -114,6 +159,11 @@ export function buildPetrelAircraft() {
   const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.4), new THREE.MeshStandardMaterial({ color: TAIL_RED, roughness: 0.5 }));
   rudder.position.set(0, 0.72, 4.35);
   body.add(rudder);
+  // Anti-collision beacon on top of the fin: a red jewel whose pulse
+  // the frame loop breathes through beaconMat.
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), beaconMat);
+  beacon.position.set(0, 1.52, 3.8);
+  body.add(beacon);
 
   // Prop assembly at the nose: spinner cone, two blades, and the
   // translucent blur disc that fades in as the throttle rises.
@@ -178,16 +228,24 @@ export function buildPetrelAircraft() {
   addWheel(0, -1.05, -3.1);
   addWheel(-0.85, -1.1, 0.5);
   addWheel(0.85, -1.1, 0.5);
+  // Wheel spats over the mains: teardrop fairings that swallow the
+  // top two-thirds of each tyre and leave the contact patch bare.
+  for (const sideSign of [-1, 1]) {
+    const spat = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), apricotDeep);
+    spat.scale.set(0.62, 0.95, 1.55);
+    spat.position.set(0.85 * sideSign, -0.9, 0.5);
+    gear.add(spat);
+  }
   body.add(gear);
 
   group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  return { group, prop, blurDisc, gear };
+  return { group, prop, blurDisc, gear, pod, beaconMat, strobeMat };
 }
 
 // Pose the group from the flight model: the model space nose is -Z,
 // so yaw is the negated compass heading and the Euler order is YXZ —
 // yaw first, then pitch, then roll about the body's own axes.
-export function updatePetrelAircraft(petrel, plane) {
+export function updatePetrelAircraft(petrel, plane, t = 0) {
   const g = petrel.group;
   g.position.set(plane.x, plane.y, plane.z);
   g.rotation.order = 'YXZ';
@@ -195,6 +253,13 @@ export function updatePetrelAircraft(petrel, plane) {
   petrel.prop.rotation.z = plane.propSpin;
   petrel.blurDisc.material.opacity = Math.min(0.26, plane.throttle * 0.3 + (plane.speed > 4 ? 0.08 : 0));
   petrel.gear.visible = plane.gearDown;
+  petrel.pod.visible = Boolean(plane.cargoPod);
+  // The fin beacon breathes in a slow swell; the strobes answer in
+  // the classic double flash, twice a breath apart.
+  const swell = Math.pow(Math.max(0, Math.sin(t * 3.4)), 6);
+  petrel.beaconMat.emissiveIntensity = 0.35 + swell * 3.4;
+  const cycle = t % 1.5;
+  petrel.strobeMat.emissiveIntensity = (cycle < 0.05 || (cycle > 0.16 && cycle < 0.21)) ? 7 : 0;
   return g;
 }
 

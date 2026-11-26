@@ -52,6 +52,33 @@ export function groundHeight(x, z) {
   return h;
 }
 
+// Fine visual relief for the rendered mesh only. The flight model
+// keeps flying the smooth chart in groundHeight; this adds the
+// multi-octave crinkle the camera sees, fading in above the beach
+// and fading out across the runway plateaus so the strips stay
+// clean and the waterline never moves.
+export function detailNoise(x, z) {
+  const a = Math.sin(x * 0.021 + z * 0.013) * 0.5
+    + Math.sin(x * 0.047 - z * 0.031) * 0.3
+    + Math.sin((x - z) * 0.093) * 0.2;
+  return a; // -1..1
+}
+
+export function visualHeight(x, z) {
+  const h = groundHeight(x, z);
+  if (h < 1.0) return h;
+  let fade = Math.min(1, (h - 1.0) / 5);
+  for (const runway of RUNWAYS) {
+    const f = runwayFrame(runway, x, z);
+    const ax = Math.max(0, Math.abs(f.along) - (runway.length / 2 + 60));
+    const az = Math.max(0, Math.abs(f.across) - (runway.width / 2 + 45));
+    const d = Math.hypot(ax, az);
+    if (d < 110) fade *= Math.min(1, d / 110);
+  }
+  const amp = 3.4 * Math.min(1, h / 60 + 0.35);
+  return h + detailNoise(x, z) * amp * fade;
+}
+
 export function surfaceKind(x, z, h) {
   for (const runway of RUNWAYS) {
     const f = runwayFrame(runway, x, z);

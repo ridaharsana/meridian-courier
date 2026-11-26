@@ -17,6 +17,7 @@ export function attachInput(input, element) {
     if (!input.keys.has(e.code)) {
       input.keys.add(e.code);
       if (e.code === 'KeyG') input.toggles.push('gear');
+      if (e.code === 'KeyX') input.toggles.push('smoke');
       if (e.code === 'KeyC') input.toggles.push('camera');
       if (e.code === 'KeyM') input.toggles.push('mission');
       if (e.code === 'Enter') input.toggles.push('confirm');

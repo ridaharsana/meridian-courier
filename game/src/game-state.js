@@ -12,6 +12,7 @@ export function createGame() {
     plane: createAircraft(),
     missionState: createMissionState(MISSIONS[0]),
     cameraMode: 'chase',
+    smokeOn: false,     // aerobatic smoke, toggled with X while flying
     paused: false,
     flash: null,        // { text, sub, until } — the gate / event callout
     totalScore: 0,
@@ -37,6 +38,8 @@ export function startSortie(game, index) {
   plane.fuel = s.fuel;
   plane.windX = mission.wind.x;
   plane.windZ = mission.wind.z;
+  plane.cargoPod = mission.id === 'cargo-lume'; // the belly pod is fitted for the mail run
+  game.smokeOn = false;
   plane.onGround = s.speed === 0;
   game.plane = plane;
   game.phase = PHASES.BRIEF;
@@ -71,6 +74,9 @@ export function handleToggle(game, toggle) {
       break;
     case 'gear':
       if (game.phase === PHASES.FLY) game.plane.gearDown = !game.plane.gearDown;
+      break;
+    case 'smoke':
+      if (game.phase === PHASES.FLY) game.smokeOn = !game.smokeOn;
       break;
     case 'camera':
       game.cameraMode = game.cameraMode === 'chase' ? 'cockpit' : 'chase';

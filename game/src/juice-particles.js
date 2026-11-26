@@ -4,12 +4,13 @@
 // a cursor. Motion follows the house motion-design rules — bursts expand
 // with ease-out drag and fade with an ease-in tail, never linear.
 
-export const PARTICLE_KINDS = { SPARK: 0, TRAIL: 1, DUST: 2 };
-const MAX_PARTICLES = 260;
+export const PARTICLE_KINDS = { SPARK: 0, TRAIL: 1, DUST: 2, SMOKE: 3 };
+const MAX_PARTICLES = 512;
 const KIND_STYLE = [
   { colour: '255,205,92', size: 2.6, drag: 2.4, gravity: -1.2 },
   { colour: '244,248,252', size: 3.4, drag: 1.1, gravity: 0.35 },
   { colour: '219,186,138', size: 4.6, drag: 1.6, gravity: 0.9 },
+  { colour: '248,250,252', size: 6.5, drag: 0.32, gravity: 0.3 },
 ];
 
 export function createParticlePool() {
@@ -17,7 +18,7 @@ export function createParticlePool() {
   for (let i = 0; i < MAX_PARTICLES; i++) {
     items.push({ alive: false, kind: 0, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 1, seed: i * 0.618 });
   }
-  return { items, cursor: 0, trailAcc: 0, rng: 1234567 };
+  return { items, cursor: 0, trailAcc: 0, smokeAcc: 0, rng: 1234567 };
 }
 
 function nextRandom(pool) {
@@ -70,6 +71,29 @@ export function spawnWingtipTrail(pool, plane, dt) {
   }
 }
 
+// Aerobatic smoke, X-key toggled: thick white puffs poured from
+// both wingtips while the system is on. They leave with most of the
+// aeroplane's slipstream, then hang, swell and thin over seconds —
+// the longest-lived kind in the pool, on the softest drag.
+export function spawnSmokeTrail(pool, plane, dt) {
+  pool.smokeAcc += dt;
+  const fx = Math.sin(plane.heading);
+  const fz = -Math.cos(plane.heading);
+  const rx = -fz;
+  const rz = fx;
+  while (pool.smokeAcc > 0.045) {
+    pool.smokeAcc -= 0.045;
+    for (const sideSign of [-1, 1]) {
+      spawnOne(pool, PARTICLE_KINDS.SMOKE,
+        plane.x + rx * 3.4 * sideSign, plane.y - 0.2, plane.z + rz * 3.4 * sideSign,
+        -fx * plane.speed * 0.55 + (nextRandom(pool) - 0.5) * 0.8,
+        0.25 + nextRandom(pool) * 0.3,
+        -fz * plane.speed * 0.55 + (nextRandom(pool) - 0.5) * 0.8,
+        3.1 + nextRandom(pool) * 1.3, 0);
+    }
+  }
+}
+
 // Warm dust kicked off the strip at touchdown (or posed behind a
 // landing aeroplane): slow, heavy, hanging in the golden light.
 export function spawnPropwashDust(pool, plane, spreadAge = 0) {
@@ -93,6 +117,7 @@ export function seedShotJuice(pool, name, plane, ring) {
   if (name === 'cover' && ring) {
     spawnRingBurst(pool, ring.x, ring.y, ring.z, 0.85);
     layTrailBehind(pool, plane, 26);
+    laySmokeBehind(pool, plane, 34);
   } else if (name === 'cargo') {
     layTrailBehind(pool, plane, 22);
     const fx = Math.sin(plane.heading);
@@ -101,6 +126,28 @@ export function seedShotJuice(pool, name, plane, ring) {
   } else if (name === 'finale') {
     spawnPropwashDust(pool, plane, 0.9);
     layTrailBehind(pool, plane, 10);
+  }
+}
+
+// The cover still catches the smoke mid-display: a ribbon laid
+// along a banking arc behind the aeroplane, ages pre-spread so the
+// near puffs are young and dense and the far ones old and thin.
+function laySmokeBehind(pool, plane, count) {
+  const fx = Math.sin(plane.heading);
+  const fz = -Math.cos(plane.heading);
+  const rx = -fz;
+  const rz = fx;
+  for (let i = 0; i < count; i++) {
+    const back = 4 + i * 2.6;
+    const curve = Math.sin(i * 0.16) * 6 + i * 0.4;
+    for (const sideSign of [-1, 1]) {
+      spawnOne(pool, PARTICLE_KINDS.SMOKE,
+        plane.x - fx * back + rx * (3.4 * sideSign + curve),
+        plane.y - 0.2 - i * 0.05,
+        plane.z - fz * back + rz * (3.4 * sideSign + curve),
+        -fx * plane.speed * 0.5, 0.3, -fz * plane.speed * 0.5,
+        4.4, (i / count) * 2.7);
+    }
   }
 }
 

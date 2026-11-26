@@ -95,5 +95,6 @@ export const CONTROLS_TEXT = [
   'W / S or ↑ ↓ — throttle & pitch (stick: arrows or mouse drag)',
   '← → or A / D — bank and turn · Q / E — rudder',
   'G — landing gear · B — wheel brakes · C — chase / cockpit camera',
+  'X — aerobatic smoke on / off',
   'M — next mission · Enter — start / restart · P — pause',
 ];

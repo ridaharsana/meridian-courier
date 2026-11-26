@@ -56,6 +56,7 @@ export function applyShotScene(game, name) {
     plane.speed = 54; plane.throttle = 0.78;
     plane.roll = 0.18; plane.onGround = false;
     game.juiceSeed = 'cover';
+    game.smokeOn = true; // the display pass: smoke ribboning off both tips
     game.missionState.mission.rings[0].passed = true;
     game.missionState.ringsPassed = 1;
     game.missionState.elapsed = 47;

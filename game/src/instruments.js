@@ -273,10 +273,11 @@ export function drawWarningLamps(ctx, plane, cx, y, u) {
     { text: 'STALL', on: plane.stalled, colour: PALETTE.lampRed },
     { text: 'LOW FUEL', on: plane.fuel < 22, colour: PALETTE.lampAmber },
     { text: 'BRAKE', on: plane.brakes, colour: PALETTE.lampAmber },
+    { text: 'SMOKE', on: plane.smokeOn, colour: '#eef4f8' },
   ];
   ctx.textAlign = 'center';
   lamps.forEach((lamp, i) => {
-    const x = cx + (i - 1.5) * u * 0.62;
+    const x = cx + (i - 2) * u * 0.62;
     ctx.fillStyle = lamp.on ? lamp.colour : 'rgba(60,72,84,0.5)';
     ctx.beginPath();
     ctx.arc(x, y, u * 0.075, 0, Math.PI * 2);

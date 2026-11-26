@@ -17,7 +17,7 @@ import { createAudio, startAudio, updateAudio, playGateChime, playTouchdownBell,
 import { applyShotScene } from './shots.js';
 import {
   createParticlePool, spawnRingBurst, spawnWingtipTrail, spawnPropwashDust,
-  seedShotJuice, updateParticles,
+  spawnSmokeTrail, seedShotJuice, updateParticles,
 } from './juice-particles.js';
 
 const glCanvas = document.getElementById('gl');
@@ -62,6 +62,14 @@ function frame(now) {
   for (const toggle of frameInput.toggles) {
     startAudio(audio);
     handleToggle(game, toggle);
+    if (toggle === 'smoke' && game.phase === PHASES.FLY) {
+      game.flash = {
+        text: game.smokeOn ? 'SMOKE ON' : 'SMOKE OFF',
+        sub: 'Aerobatic smoke from both wingtips',
+        until: t + 1.4,
+        start: t,
+      };
+    }
     if (toggle === 'confirm' && game.phase === PHASES.BRIEF) {
     }
   }
@@ -88,7 +96,10 @@ function frame(now) {
     updateParticles(juicePool, dt * 0.22);
   } else if (game.phase === PHASES.FLY && !game.paused) {
     updateParticles(juicePool, dt);
-    if (!game.plane.onGround) spawnWingtipTrail(juicePool, game.plane, dt);
+    if (!game.plane.onGround) {
+      spawnWingtipTrail(juicePool, game.plane, dt);
+      if (game.smokeOn) spawnSmokeTrail(juicePool, game.plane, dt);
+    }
   }
 
   if (game.cameraMode === 'cockpit') cockpitCamera(camera, game.plane);
@@ -134,6 +145,7 @@ function render(t, dt) {
   const width = canvas.width;
   const height = canvas.height;
   const plane = game.plane;
+  plane.smokeOn = game.smokeOn; // the panel's SMOKE lamp reads the plane
   syncWorld(world, game, camera, juicePool, t, dt);
   ctx.clearRect(0, 0, width, height);
   if (game.cameraMode === 'cockpit') {

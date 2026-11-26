@@ -1,7 +1,5 @@
 // terrain-archipelago.js — the heightfield of the Skyferry Archipelago.
 // One job: answer "how high is the ground at (x, z)?" and describe the
-// surfaces a pilot can see — island slopes, runway plateaus, the harbour
-// town's building blocks — so the renderer only has to draw, never decide.
 
 import { ISLANDS, RUNWAYS } from './config.js';
 
@@ -90,10 +88,6 @@ function buildTownBlocks() {
       const z = lume.z + 250 + gz * 80 + (next() - 0.5) * 18;
       // Since v7 a block is a house, not a box: the walk now also
       // deals its kind (a low cottage, a two-storey house, or one
-      // of the harbour's long warehouses on the town's sea edge),
-      // its wall and roof colours from the town's small stock, a
-      // chimney for the houses that burn driftwood, a door face,
-      // and a garden for the plots that kept a tree.
       const typeRoll = next();
       const type = gz === 0 && typeRoll < 0.3 ? 'warehouse'
         : typeRoll < 0.52 ? 'cottage' : 'house';

@@ -1,8 +1,5 @@
 // audio.js — a WebAudio panel of small synthesised sounds, no audio files:
 // the engine's putter rising with throttle, wind over the airframe, a
-// chime for a clean gate, a bell for a touchdown worth framing and a dull
-// crunch for one that was not. One job: sound, started by the pilot's
-// first touch because browsers insist on it.
 
 export function createAudio() {
   return { ctx: null, engine: null, engineGain: null, wind: null, windGain: null, started: false };

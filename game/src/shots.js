@@ -11,8 +11,6 @@ export function applyShotScene(game, name) {
   game.shotCam = null;
   // v10: the cover station pulls back and aims off the course line
   // (back 17, aimSide −10) — v9's close quarter parked the plane in
-  // the lower-left; from further back the flank reads gentler and
-  // the off-line aim centres the plane with the ring still ahead.
   const QUARTER = { side: 6.5, up: 2.4, aim: 42, back: 17, aimSide: -10 };
   // Cargo is shot from the port quarter instead: its showcase is the
   // fleet working the bay ahead-left, and a starboard station swings

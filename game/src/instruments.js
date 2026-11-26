@@ -1,7 +1,5 @@
 // instruments.js — the lit panel: attitude indicator, altimeter, airspeed
 // dial, compass ribbon, vertical speed and the throttle / fuel / hull
-// gauges. One job: turn flight-model numbers into instruments that look
-// flown — glass, needles, drums and warning lamps, in both camera views.
 
 import { PALETTE } from './config.js';
 import { headingDegrees } from './flight-model.js';
@@ -124,7 +122,6 @@ export function drawAltimeter(ctx, plane, x, y, r) {
   const feet = Math.max(0, plane.y * 3.281);
   // Tick ring at the rim, numerals in their own clear band inside it —
   // v1 printed the numerals where the drum window landed, and the two
-  // garbled each other on every screenshot.
   ctx.strokeStyle = '#cfe0ec';
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
@@ -142,7 +139,6 @@ export function drawAltimeter(ctx, plane, x, y, r) {
   needle(ctx, x, y, ((feet / 10000) % 1) * Math.PI * 2, r * 0.42, PALETTE.lampAmber);
   // The drum window sits in the one empty band of the dial — below the
   // hub, above the bottom numeral — framed, with FEET in microprint
-  // under it and ×100 FT at the dial's foot where nothing else lives.
   ctx.fillStyle = '#05080b';
   ctx.fillRect(x - r * 0.3, y + r * 0.16, r * 0.6, r * 0.22);
   ctx.strokeStyle = '#48586a';

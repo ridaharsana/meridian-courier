@@ -1,6 +1,5 @@
 // game-state.js — the day's shape: title → briefing → flying → verdict,
 // mission to mission. One job: own the phase machine and the (re)starting
-// of sorties, so main.js only has to step and draw what this decides.
 
 import { createAircraft } from './flight-model.js';
 import { MISSIONS, createMissionState } from './missions.js';

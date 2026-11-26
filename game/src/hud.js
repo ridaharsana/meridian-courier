@@ -1,7 +1,5 @@
 // hud.js — everything the pilot reads that is not an instrument: the big
 // ALTITUDE / SPEED / HEADING digits, the mission banner and objective
-// arrow, the gate flash, and the full-screen states (title, briefing,
-// touchdown verdict, crash, results). One job: words and numbers on glass.
 
 import { PALETTE, WORLD, CONTROLS_TEXT } from './config.js';
 import { headingDegrees } from './flight-model.js';

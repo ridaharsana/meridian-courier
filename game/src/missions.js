@@ -1,7 +1,5 @@
 // missions.js — the day's work for the Meridian Courier: three sorties
 // with different goals, the rings they fly through, the wind they fight
-// and the score they earn. One job: define each mission, watch the flight
-// against its goal, and say when a sortie is done, and how well.
 
 import { RUNWAYS } from './config.js';
 import { angleDiff } from './flight-model.js';

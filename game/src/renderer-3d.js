@@ -61,7 +61,6 @@ function sstep(a, b, v) {
 const CROP_TONES = ['cropWheat', 'cropYoung', 'cropDeep', 'cropPlough', 'cropFallow', 'grassHigh'];
 
 // Inside Porto Lume's town rectangle the ground stays plain grass:
-// the houses carry that quarter, and plots under a street grid
 function inTownGround(x, z) {
   const lume = ISLANDS.find((i) => i.town);
   return lume && x > lume.x - 400 && x < lume.x + 400 && z > lume.z + 150 && z < lume.z + 580;
@@ -125,7 +124,6 @@ export function terrainBaseRgb(h, slope, x, z) {
   const shoreW = sstep(-7, -2.5, h) * (1 - sstep(5.5, 9.5, h));
   // v10: a second, slower warp for the deep shelf — the shore warp
   // dies below −7 m, which left the deep contours printing as one
-  // long straight edge across the bay. This bends them organic.
   const deepW = sstep(-3, -6, h);
   const hw = h + chartNoise(x * 6.1, z * 6.1) * 0.9 * shoreW
     + (chartNoise(x * 3.4 + 31, z * 3.4 - 17) * 2.6
@@ -280,7 +278,6 @@ export function createCamera() {
 export function chaseCamera(camera, plane, dt, snap = false, view = null) {
   // A posed view may pull the station back (view.back) and aim off
   // the course line (view.aimSide) — the v10 cover uses both to
-  // hold the three-quarter angle yet centre the aeroplane.
   const back = view && view.back ? view.back : 10.5 + plane.speed * 0.02;
   const fx = Math.sin(plane.heading);
   const fz = -Math.cos(plane.heading);
@@ -415,7 +412,6 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
   ctx.fillStyle = g;
   ctx.fillRect(0, horizon, width, height - horizon);
   // A soft band of warm horizon haze straddling the waterline:
-  // strongest exactly where sea meets sky, gone a few dozen pixels
   const band = ctx.createLinearGradient(0, horizon - 14, 0, horizon + 64);
   band.addColorStop(0, 'rgba(232,201,154,0)');
   band.addColorStop(0.18, 'rgba(232,201,154,0.5)');
@@ -480,7 +476,6 @@ export function drawTerrain(ctx, project, plane) {
       const h = groundHeight(x + step / 2, z + step / 2);
       // v10: every cell is drawn, sea floor included — cutting the
       // mesh at any depth left the shelf ending against the flat
-      // sea along a grid-stepped straight edge (see above).
       const dx = x + step / 2 - plane.x;
       const dz = z + step / 2 - plane.z;
       cells.push({ x, z, h, d2: dx * dx + dz * dz });
@@ -495,7 +490,6 @@ export function drawTerrain(ctx, project, plane) {
     const shoreCell = cell.h > -9 && cell.h < 10;
     // v10: deep cells subdivide like shore cells (at n=1–2 the
     // deep gradient averaged into terraced 65–130 m steps), while
-    // a true floor cell is one flat deep quad at any distance.
     const deepCell = cell.h < -9;
     const floorCell = cell.h <= -13.9;
     const n = floorCell ? 1 : dist < 520 ? (shoreCell ? 12 : 8) : dist < 2400 ? (cell.h > 45 ? 3 : shoreCell || deepCell ? 4 : 2) : cell.h > 45 || deepCell ? 2 : 1;
@@ -545,13 +539,11 @@ export function drawTerrain(ctx, project, plane) {
         const cd = hazed(d);
         // Water dither: per-quad hash grain so the eye reads
         // texture where the ramp steps — v10 extends the shore
-        // band's dither to every water cell, deep shelf included.
         const jit = shoreCell || cell.h < 0.4
           ? 0.965 + cellHash(Math.round(cell.x / step) * 57 + i * 3, Math.round(cell.z / step) * 57 + j * 3) * 0.07
           : 1;
         ctx.fillStyle = `rgb(${Math.round(((ca[0] + cb[0] + cc[0] + cd[0]) / 4) * jit)},${Math.round(((ca[1] + cb[1] + cc[1] + cd[1]) / 4) * jit)},${Math.round(((ca[2] + cb[2] + cc[2] + cd[2]) / 4) * jit)})`;
         // Each corner pushed a hair outward from the quad's centre:
-        // projected neighbours land on fractional pixels, and an
         if (a.clip || b.clip || c.clip || d.clip) {
           const poly = project.clipPolygon([
             { x: a.wx, y: a.wh, z: a.wz },
@@ -1335,7 +1327,6 @@ function drawBird(ctx, p, spanPx, flap, tilt) {
 // Landmarks a pilot navigates by and a screenshot remembers: the
 
 // One projected quad, the brick every feature below is built from.
-// Corners are [x, y, z] world triples; a corner behind the camera
 function featureQuad(ctx, project, corners, fill) {
   const pts = corners.map(([x, y, z]) => project(x, y, z));
   if (pts.some((p) => !p)) return;
@@ -1361,6 +1352,13 @@ export function drawBridge(ctx, project) {
   const HW = 5.5; // half deck width
   const deckY = (t) => 13 + Math.sin(t * Math.PI) * 2.5;
   const SEG = 16;
+  // Distance treatment (v11): past a kilometre the span must stop
+  // drawing threads and beads at full contrast — the whole bridge
+  const midP = project(A.x + dx * 0.5, deckY(0.5), A.z + dz * 0.5);
+  const depth = midP ? midP.depth : 0;
+  const fade = sstep(1000, 1600, depth);
+  const blend = Math.min(0.6, sstep(1500, 3500, depth) * 0.6 + 0.38 * fade);
+  const farHex = (hex) => (blend > 0.01 ? mixHex(hex, PALETTE.haze, blend) : hex);
   for (let sgm = 0; sgm < SEG; sgm++) {
     const t0 = sgm / SEG;
     const t1 = (sgm + 1) / SEG;
@@ -1372,20 +1370,20 @@ export function drawBridge(ctx, project) {
       [c1.x + px * HW, deckY(t1), c1.z + pz * HW],
       [c1.x + px * HW, deckY(t1) - 1.6, c1.z + pz * HW],
       [c0.x + px * HW, deckY(t0) - 1.6, c0.z + pz * HW],
-    ], '#5d4f40');
+    ], farHex('#5d4f40'));
     featureQuad(ctx, project, [
       [c0.x - px * HW, deckY(t0), c0.z - pz * HW],
       [c0.x + px * HW, deckY(t0), c0.z + pz * HW],
       [c1.x + px * HW, deckY(t1), c1.z + pz * HW],
       [c1.x - px * HW, deckY(t1), c1.z - pz * HW],
-    ], '#8a755c');
+    ], farHex('#8a755c'));
     // A pale centreline the deck wears like a road.
     featureQuad(ctx, project, [
       [c0.x - px * 0.5, deckY(t0) + 0.06, c0.z - pz * 0.5],
       [c0.x + px * 0.5, deckY(t0) + 0.06, c0.z + pz * 0.5],
       [c1.x + px * 0.5, deckY(t1) + 0.06, c1.z + pz * 0.5],
       [c1.x - px * 0.5, deckY(t1) + 0.06, c1.z - pz * 0.5],
-    ], 'rgba(245,240,220,0.5)');
+    ], `rgba(245,240,220,${0.5 * (1 - 0.6 * fade)})`);
   }
   // Pylons: two concrete legs standing in the strait.
   for (const tp of [0.34, 0.67]) {
@@ -1397,7 +1395,7 @@ export function drawBridge(ctx, project) {
       [cxp + px * 3.4, topY, czp + pz * 3.4],
       [cxp + px * 4.4, -6, czp + pz * 4.4],
       [cxp - px * 4.4, -6, czp - pz * 4.4],
-    ], '#6d5f4d');
+    ], farHex('#6d5f4d'));
   }
   // The suspension work: twin towers at the third points rising
   // seventeen metres over the deck, a crossbar between each pair of
@@ -1416,6 +1414,24 @@ export function drawBridge(ctx, project) {
     }
     return deckY(t) + 3;
   };
+  // The cable as drawn: the key line corner-cut twice (Chaikin),
+  // so the sag hangs as a curve instead of zigzagging between keys.
+  const CN = 40;
+  let cYs = [];
+  for (let i = 0; i <= CN; i++) cYs.push(cableY(i / CN));
+  for (let p = 0; p < 2; p++) {
+    const nx = [cYs[0]];
+    for (let i = 0; i < cYs.length - 1; i++) {
+      nx.push(cYs[i] * 0.75 + cYs[i + 1] * 0.25, cYs[i] * 0.25 + cYs[i + 1] * 0.75);
+    }
+    nx.push(cYs[cYs.length - 1]);
+    cYs = nx;
+  }
+  const cableSY = (t) => {
+    const f = t * (cYs.length - 1);
+    const i = Math.min(cYs.length - 2, Math.floor(f));
+    return cYs[i] + (cYs[i + 1] - cYs[i]) * (f - i);
+  };
   for (const tp of [T1, T2]) {
     const cxp = A.x + dx * tp;
     const czp = A.z + dz * tp;
@@ -1425,14 +1441,14 @@ export function drawBridge(ctx, project) {
         [cxp + px * HW * sideT + ux * 1.1, towerTop(tp), czp + pz * HW * sideT + uz * 1.1],
         [cxp + px * HW * sideT + ux * 1.1, deckY(tp) - 2, czp + pz * HW * sideT + uz * 1.1],
         [cxp + px * HW * sideT - ux * 1.1, deckY(tp) - 2, czp + pz * HW * sideT - uz * 1.1],
-      ], '#7d6c55');
+      ], farHex('#7d6c55'));
     }
     featureQuad(ctx, project, [
       [cxp - px * HW - ux * 1.1, towerTop(tp) - 2.2, czp - pz * HW - uz * 1.1],
       [cxp + px * HW + ux * 1.1, towerTop(tp) - 2.2, czp + pz * HW + uz * 1.1],
       [cxp + px * HW + ux * 1.1, towerTop(tp) - 4.4, czp + pz * HW + uz * 1.1],
       [cxp - px * HW - ux * 1.1, towerTop(tp) - 4.4, czp - pz * HW - uz * 1.1],
-    ], '#6d5f4d');
+    ], farHex('#6d5f4d'));
     // A second, lower crossbar: two bars make a portal frame, and a
     // portal frame reads as a bridge tower even seen dead end-on —
     featureQuad(ctx, project, [
@@ -1440,18 +1456,25 @@ export function drawBridge(ctx, project) {
       [cxp + px * HW + ux * 1.1, deckY(tp) + 7.2, czp + pz * HW + uz * 1.1],
       [cxp + px * HW + ux * 1.1, deckY(tp) + 5.2, czp + pz * HW + uz * 1.1],
       [cxp - px * HW - ux * 1.1, deckY(tp) + 5.2, czp - pz * HW - uz * 1.1],
-    ], '#6d5f4d');
+    ], farHex('#6d5f4d'));
   }
-  for (const sideC of [-1, 1]) {
-    const off = HW * 0.92 * sideC;
-    ctx.strokeStyle = 'rgba(38,36,34,0.85)';
+  // Cables: the twin side runs carry the span near-to; with
+  // distance they thin out and a single centre run takes over, so
+  const cableRuns = [
+    { off: HW * 0.92, a: (1 - 0.75 * fade) },
+    { off: -HW * 0.92, a: (1 - 0.75 * fade) },
+  ];
+  if (fade > 0.03) cableRuns.push({ off: 0, a: fade });
+  ctx.strokeStyle = farHex('#262422');
+  for (const run of cableRuns) {
+    ctx.globalAlpha = 0.85 * (1 - 0.4 * fade) * run.a;
     let cablePts = null;
     let midScale = 1;
-    for (let sgm = 0; sgm <= 20; sgm++) {
-      const t = sgm / 20;
-      const p = project(A.x + dx * t + px * off, cableY(t), A.z + dz * t + pz * off);
+    for (let sgm = 0; sgm <= 40; sgm++) {
+      const t = sgm / 40;
+      const p = project(A.x + dx * t + px * run.off, cableSY(t), A.z + dz * t + pz * run.off);
       if (!p) { cablePts = null; continue; }
-      if (sgm === 10) midScale = p.scale;
+      if (sgm === 20) midScale = p.scale;
       if (!cablePts) {
         cablePts = [];
         ctx.lineWidth = Math.max(1, p.scale * 0.5);
@@ -1464,21 +1487,28 @@ export function drawBridge(ctx, project) {
     }
     if (cablePts && cablePts.length > 1) ctx.stroke();
     // Hangers: a vertical thread every eighth of the span.
-    ctx.lineWidth = Math.max(0.7, midScale * 0.22);
-    for (let hIdx = 1; hIdx < 8; hIdx++) {
-      const t = hIdx / 8;
-      const pTop = project(A.x + dx * t + px * off, cableY(t), A.z + dz * t + pz * off);
-      const pBot = project(A.x + dx * t + px * off, deckY(t), A.z + dz * t + pz * off);
-      if (!pTop || !pBot) continue;
-      ctx.beginPath();
-      ctx.moveTo(pTop.x, pTop.y);
-      ctx.lineTo(pBot.x, pBot.y);
-      ctx.stroke();
+    if (run.off !== 0 && fade <= 0.35) {
+      ctx.lineWidth = Math.max(0.7, midScale * 0.22);
+      for (let hIdx = 1; hIdx < 8; hIdx++) {
+        const t = hIdx / 8;
+        const pTop = project(A.x + dx * t + px * run.off, cableSY(t), A.z + dz * t + pz * run.off);
+        const pBot = project(A.x + dx * t + px * run.off, deckY(t), A.z + dz * t + pz * run.off);
+        if (!pTop || !pBot) continue;
+        ctx.beginPath();
+        ctx.moveTo(pTop.x, pTop.y);
+        ctx.lineTo(pBot.x, pBot.y);
+        ctx.stroke();
+      }
     }
   }
-  // Rail lamps: a warm bead every forty metres, lit for the evening.
-  ctx.fillStyle = PALETTE.lampAmber;
-  for (let sgm = 0; sgm <= SEG; sgm++) {
+  ctx.globalAlpha = 1;
+  // Rail lamps: a warm bead every forty metres, lit for the
+  // evening. Distance thins them (every other bead), shrinks them
+  ctx.fillStyle = blend > 0.01
+    ? mixHex(PALETTE.lampAmber, PALETTE.haze, blend * 0.7) : PALETTE.lampAmber;
+  ctx.globalAlpha = 1 - 0.25 * fade;
+  const lampStep = fade > 0.5 ? 2 : 1;
+  for (let sgm = 0; sgm <= SEG; sgm += lampStep) {
     const t = sgm / SEG;
     for (const sideLamp of [-1, 1]) {
       const p = project(
@@ -1486,14 +1516,16 @@ export function drawBridge(ctx, project) {
         A.z + dz * t + pz * HW * sideLamp);
       if (!p) continue;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(1.1, p.scale * 1.3), 0, Math.PI * 2);
+      ctx.arc(p.x, p.y,
+        Math.max(1.1 - 0.55 * fade, p.scale * 1.3 * (1 - 0.3 * fade)),
+        0, Math.PI * 2);
       ctx.fill();
     }
   }
+  ctx.globalAlpha = 1;
 }
 
 // Working boats (v8): the sea is a workplace now, not a backdrop.
-// v6 floated three boats and in stills they read as specks — a boat
 const BOAT_LANES = [
   { kind: 'coaster', len: 36, ax: 2030, az: 1420, bx: 2280, bz: 1510, speed: 3.2, phase: 0.35, name: 'bay coaster' },
   { kind: 'ferry', len: 26, ax: 1920, az: 1180, bx: 2080, bz: 1520, speed: 3.8, phase: 0.54, name: 'lume ferry' },
@@ -1636,19 +1668,25 @@ function drawBoat(ctx, project, boat, pose, t) {
     const mastFoot = at(L * 0.05, 0, freeboard);
     const boomEnd = at(-L * 0.42, lean(2.4), 2.4);
     const jibFoot = at(L * 0.46, lean(1.9), 1.9);
+    // Distance cools the canvas (v11): a sail a kilometre out is
+    // hazed like the hills behind it, not a white cut-out — the
+    const bp = project(pose.x, 0, pose.z);
+    const bhz = bp ? Math.min(0.6, sstep(1500, 3500, bp.depth) * 0.6
+      + 0.5 * sstep(1000, 1600, bp.depth)) : 0;
+    const sailHex = (hex) => (bhz > 0.01 ? mixHex(hex, PALETTE.haze, bhz) : hex);
     if (pose.moving) {
-      featureQuad(ctx, project, [mastTop, mastFoot, boomEnd, boomEnd], '#fdf6e0');
-      featureQuad(ctx, project, [mastTop, mastFoot, jibFoot, jibFoot], '#f3e8cc');
+      featureQuad(ctx, project, [mastTop, mastFoot, boomEnd, boomEnd], sailHex('#fdf6e0'));
+      featureQuad(ctx, project, [mastTop, mastFoot, jibFoot, jibFoot], sailHex('#f3e8cc'));
     } else {
       // Furled: the sail sleeps as a slim bundle along the boom.
       featureQuad(ctx, project, [
         at(L * 0.03, 0, freeboard + 0.85), at(-L * 0.42, 0, freeboard + 0.85),
         at(-L * 0.42, 0, freeboard + 0.3), at(L * 0.03, 0, freeboard + 0.3),
-      ], '#e6dcc2');
+      ], sailHex('#e6dcc2'));
     }
     const mp = [mastFoot, mastTop].map(([x, y, z]) => project(x, y, z));
     if (!mp.some((p) => !p)) {
-      ctx.strokeStyle = '#4c3d28';
+      ctx.strokeStyle = sailHex('#4c3d28');
       ctx.lineWidth = Math.max(1, mp[0].scale * 0.35);
       ctx.beginPath();
       ctx.moveTo(mp[0].x, mp[0].y);
@@ -1784,9 +1822,15 @@ export function drawPier(ctx, project) {
     ], '#4c3d28');
     const lamp = project(pier.x1, endY + 3.5, pier.z1);
     if (lamp) {
-      ctx.fillStyle = PALETTE.lampAmber;
+      // The same distance law as the bridge lamps (v11): a far
+      // jetty light shrinks and cools instead of floating as a bead.
+      const pf = sstep(1000, 1600, lamp.depth);
+      const pb = Math.min(0.6,
+        sstep(1500, 3500, lamp.depth) * 0.6 + 0.38 * pf) * 0.7;
+      ctx.fillStyle = pb > 0.01
+        ? mixHex(PALETTE.lampAmber, PALETTE.haze, pb) : PALETTE.lampAmber;
       ctx.beginPath();
-      ctx.arc(lamp.x, lamp.y, Math.max(1.2, lamp.scale * 1.3), 0, Math.PI * 2);
+      ctx.arc(lamp.x, lamp.y, Math.max(1.2 - 0.6 * pf, lamp.scale * 1.3), 0, Math.PI * 2);
       ctx.fill();
     }
   }

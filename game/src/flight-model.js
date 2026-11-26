@@ -1,6 +1,5 @@
 // flight-model.js — how the Petrel flies: throttle, lift, stall, banked
 // turns, wind, fuel and hull. One job: step the aircraft state forward and
-// judge every contact with the ground — touchdown, bounce, splash, crash.
 
 import { AIRCRAFT, WORLD } from './config.js';
 import { groundHeight, runwayFrame } from './terrain-archipelago.js';
@@ -84,8 +83,6 @@ function judgeGroundContact(plane, input, dt) {
   }
   // Contact. Only an aeroplane that was truly airborne gets its arrival
   // judged: one already rolling follows the ground over bumps and dips
-  // in silence, and a gentle settle (sink under 1.2 m/s) is just weight
-  // coming back onto the gear, never a scored touchdown.
   const wasAirborne = !plane.onGround;
   const sink = -plane.vertical;
   const runway = RUNWAYS.find((r) => {

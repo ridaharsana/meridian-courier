@@ -1,7 +1,5 @@
 // input.js — keyboard and mouse into one stick-and-throttle object the
 // flight model understands. Arrows and WASD fly, the mouse drags the stick
-// and its wheel works the throttle lever, and every control the briefing
-// promises is wired here and nowhere else.
 
 export function createInput() {
   return {
@@ -57,8 +55,6 @@ export function readInput(input) {
   const k = input.keys;
   // Pitch convention, settled: +1 hauls the nose up. Pulling the stick
   // back (↓, or dragging the mouse down) is how a pilot climbs; pushing
-  // it forward (↑, drag up) puts the nose down. W/S are the throttle
-  // lever alone, never the stick, so the two can never fight.
   let pitch = 0;
   let roll = 0;
   let yaw = 0;

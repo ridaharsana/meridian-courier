@@ -1,20 +1,11 @@
 // renderer-3d.js — a hand-rolled perspective projector that paints the
 // archipelago on a 2D canvas: sky, sun and cloud shadows first, then the
-// heightfield as a subdivided, vertex-lit mesh over a continuous colour
-// ramp sorted far to near, then runways, the harbour town, landmarks and
-// the mission rings. One job: turn world coordinates into a picture a
-// pilot can read at a glance.
 
 import { WORLD, PALETTE, RUNWAYS, ISLANDS } from './config.js';
 import { groundHeight, surfaceKind, chartNoise, runwayFrame, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
 
 // The sun's direction, one for the whole world — and, since v6,
 // shared with aircraft-art.js so the aeroplane is lit by the same
-// sun as the ground it flies over. Golden hour: low in the east and
-// a little north — (0.66, 0.34, -0.38) unnormalised — so slopes rake,
-// shadows lengthen and the sea can hold a glitter path. Every slope
-// shade, glitter dash and lit wall in the game is computed against
-// it, so the light agrees with itself from the sky to the rooftops.
 export const SUN_DIR = { x: 0.66, y: 0.34, z: -0.38 };
 
 // Scale a #rrggbb colour by a light factor, clamped so shade never
@@ -38,13 +29,6 @@ export function cellHash(gx, gz) {
 
 // --- The de-boxed ground: one continuous colour ramp, vertex-lit ---
 // v1–v3 coloured each 130 m cell with a single flat fill picked from
-// hard biome classes, so beaches came out as squares, the sea shelf
-// as flat rectangles and the mountain as plain facets. The ground is
-// now coloured by a ramp that never steps: every vertex of a fine
-// 65 m grid takes its colour from its own height, slope and chart
-// noise, lit by its own surface normal, and each drawn quad averages
-// its corners — slopes shade continuously and biome edges wander
-// with the contours instead of snapping to the grid.
 
 const RGB_CACHE = new Map();
 
@@ -74,13 +58,6 @@ function sstep(a, b, v) {
 
 // --- The worked lowlands: farmland that breaks the last grid ---
 // v4's foreground still read as big flat squares: at grazing angles
-// one flat-filled sub-quad covers hundreds of pixels, and on the
-// flat lowlands nothing interrupted the mesh. The lowlands are now
-// farmed. Plots lie on a grid turned ~18° off the world's axes and
-// warped by chart noise, so no boundary ever runs with the drawing
-// mesh; each plot takes a crop tone from its hash, carries plough
-// rows along its own direction, and is fenced by a dark hedgerow.
-// A sandy track rings each big island through its field band.
 
 const CROP_TONES = ['cropWheat', 'cropYoung', 'cropDeep', 'cropPlough', 'cropFallow', 'grassHigh'];
 
@@ -123,8 +100,6 @@ function fieldTint(c, h, slope, x, z) {
   const crop = hexRgb(PALETTE[CROP_TONES[Math.min(5, Math.floor(plotHash * 6))]]);
   // Plough rows run along a direction the plot's own hash chooses,
   // a gentle light-dark breathing across the field. The rows are
-  // wide and faint on purpose: sampled on the 65 m vertex grid, a
-  // tight bright stripe would alias into per-vertex patchwork.
   const sta = plotHash * Math.PI;
   const su = ((pu - 0.5) * Math.cos(sta) + (pv - 0.5) * Math.sin(sta)) * S;
   const rows = 0.5 + 0.5 * Math.sin(su * ((Math.PI * 2) / 26) + plotHash * 30);
@@ -160,8 +135,6 @@ export function terrainBaseRgb(h, slope, x, z) {
   }
   // Sand: wet at the waterline, dry and pale a few metres up. Over
   // the very lip lies the foam's soft edge — a pale band whose
-  // strength the fine chart noise keeps breaking up, so the waterline
-  // reads as surf, not as a drawn line.
   let c = mixRgb(hexRgb(PALETTE.sandWet), hexRgb(PALETTE.sandDry), sstep(0.4, 3.4, h));
   const foamN = 0.5 + 0.5 * chartNoise(x * 2.6, z * 2.6);
   const foam = (1 - Math.abs(h - 0.65) / 0.95) * (0.3 + 0.55 * foamN);
@@ -178,11 +151,6 @@ export function terrainBaseRgb(h, slope, x, z) {
   if (tinted) c = tinted;
   // Rock: broad tonal bands with edges the noise tears apart, and
   // darker scree flecked through them. Steep ground gives up its
-  // grass and shows rock at any height, and high ground turns rocky
-  // even where it lies gentle. (v4's strata ran at a tight vertical
-  // period keyed to height alone, so on a smooth dome they printed
-  // as contour lines — the bands are wider now, weaker, and their
-  // phase is dragged sideways by noise until no line survives.)
   const strata = 0.5 + 0.5 * Math.sin(h * 0.05 + chartNoise(x * 2, z * 2) * 3.4);
   let rock = mixRgb(hexRgb(PALETTE.rockDark), hexRgb(PALETTE.rock), 0.42 + strata * 0.38);
   const scree = 0.5 + 0.5 * chartNoise(x * 5.1, z * 5.1);
@@ -201,8 +169,6 @@ export function terrainBaseRgb(h, slope, x, z) {
   }
   // Fine organic mottling, the last word: a noise pass at tens of
   // metres' wavelength, so flat meadows and beaches carry tonal
-  // patches that wander like real ground — never polished flat, and
-  // never repeating with the grid that draws them.
   const fine = 0.5 + 0.5 * chartNoise(x * 13.7, z * 13.7);
   const tone = 0.965 + fine * 0.07;
   return [c[0] * tone, c[1] * tone, c[2] * tone];
@@ -210,8 +176,6 @@ export function terrainBaseRgb(h, slope, x, z) {
 
 // The fine shading grid: vertices every 65 m (half a terrain cell),
 // their heights and lit colours cached for the length of one frame
-// so neighbouring cells share the very same corner — the mesh has
-// no seams and the colour field has no steps.
 const FINE = WORLD.terrainStep / 2;
 let heightCache = new Map();
 let vertexCache = new Map();
@@ -232,8 +196,6 @@ function heightAt(ix, iz) {
 
 // One grid vertex, fully lit: its normal comes from the heightfield
 // itself (forward differences over the fine step), its colour from
-// the ramp, and a whisper of per-vertex grain — planted by the grid
-// hash — so sand and grass carry speckle instead of polish.
 export function vertexAt(ix, iz) {
   const k = cacheKey(ix, iz);
   let v = vertexCache.get(k);
@@ -253,9 +215,6 @@ export function vertexAt(ix, iz) {
   const grain = 0.985 + cellHash(ix * 3 + 11, iz * 3 - 7) * 0.03;
   // Cloud shadow: broad soft patches of shade, hundreds of metres
   // across, laid over land and shelf alike — the still pools of
-  // darker ground a pilot sees under a broken sky. Kept under a
-  // tenth of the light, so they soften the world without ever
-  // reading as terrain of their own.
   const cs = Math.sin(x * 0.0016 + 1.7) * Math.sin(z * 0.0013 - 0.6)
     + 0.5 * Math.sin(x * 0.0007 - 0.9) * Math.sin(z * 0.0021 + 2.0);
   const cloudShade = 1 - 0.09 * sstep(0.25, 0.95, cs);
@@ -272,8 +231,6 @@ export function vertexAt(ix, iz) {
 
 // A sample anywhere on the ground: an exact grid vertex when the
 // point lands on the fine grid, otherwise a bilinear blend of the
-// four vertices around it — height and lit colour alike, so a
-// subdivided quad curves with the hill instead of faceting.
 export function samplePoint(wx, wz) {
   const gx = wx / FINE;
   const gz = wz / FINE;
@@ -308,9 +265,6 @@ export function createCamera() {
 
 // Chase camera: settles behind and above the tail, leaning into the bank so
 // the horizon tilts with the aeroplane instead of fighting it. Since
-// v6 it flies closer and lower — the Petrel is real 3D geometry now
-// and fills near half the frame, the way a chase plane on a filming
-// sortie actually frames her.
 export function chaseCamera(camera, plane, dt, snap = false) {
   const back = 10.5 + plane.speed * 0.02;
   const tx = plane.x - Math.sin(plane.heading) * back;
@@ -371,12 +325,6 @@ export function makeProjector(camera, width, height) {
   }
   // Polygon clipping against the near plane, for ground quads: a
   // quad straddling the camera is cut at half a metre and the cut
-  // polygon paints to the frame's edges, instead of the whole quad
-  // vanishing and leaving the sea showing under the aeroplane on a
-  // ground roll. (Sliding the lost corners along their own rays —
-  // the obvious shortcut — images them across the centre and the
-  // polygon still misses the ground it should cover; the cut has
-  // to happen on the edges, in camera space.)
   project.clipPolygon = (worldPts) => {
     let poly = worldPts.map((p) => basis(p.x, p.y, p.z));
     const res = [];
@@ -434,8 +382,6 @@ export function drawSky(ctx, camera, width, height) {
 export function drawSea(ctx, project, camera, width, height, horizon) {
   // Open water deepens away from the horizon line; the shallows near a
   // shore are the terrain shelf's own colour, drawn with the land.
-  // The far water starts as haze-blue and only deepens as it nears,
-  // so the sea climbs into the sky instead of meeting it at a cut.
   const g = ctx.createLinearGradient(0, horizon, 0, height);
   g.addColorStop(0, '#cfa878');
   g.addColorStop(0.22, '#2b8296');
@@ -454,8 +400,6 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
   ctx.fillRect(0, horizon - 14, width, 78);
   // Sun glitter: at golden hour the path on the water under the sun
   // runs broad and warm — dashes clustered toward the sun's side of
-  // the frame and thinning outward, plus a sparse scatter elsewhere.
-  // It sells the altitude, and the hour, instantly.
   for (let i = 0; i < 74; i++) {
     const onPath = i < 52;
     const gx = onPath ? 0.84 + (((i * 197) % 199) / 199 - 0.5) * 0.68 : ((i * 613) % 997) / 997;
@@ -468,8 +412,6 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
   }
   // Swell: long low bands of light rolling across the water, drawn
   // as dashed projected lines ahead of the camera so they lie on the
-  // sea's own surface, foreshorten with distance and break up the
-  // last of the flat open-water sheet.
   const fxw = Math.sin(camera.heading);
   const fzw = -Math.cos(camera.heading);
   const rxw = -fzw;
@@ -523,9 +465,6 @@ export function drawTerrain(ctx, project, plane) {
   for (const cell of cells) {
     // Adaptive subdivision: the ground under the aeroplane is cut
     // six ways, the mid-distance two, and the far hills two as well
-    // — only the flat far shelf is left whole. The mesh is finest
-    // exactly where a pilot's eye can measure it, and no hillside
-    // anywhere is one flat quad deep.
     const dist = Math.sqrt(cell.d2);
     const n = dist < 520 ? 8 : dist < 2400 ? (cell.h > 45 ? 3 : 2) : cell.h > 45 ? 2 : 1;
     const pts = [];
@@ -536,11 +475,6 @@ export function drawTerrain(ctx, project, plane) {
         const v = samplePoint(wx, wz);
         // The grid keeps its WORLD corners: the fill below clips
         // each sub-quad against the near plane in camera space, so
-        // a corner behind the camera cuts the quad at the frame's
-        // edge instead of deleting it — deleting it tore a
-        // sea-coloured gash under the aeroplane on every ground
-        // roll. Depth is only the haze's business; a corner behind
-        // the camera is near by definition, so it takes none.
         const p = project(wx, v.h, wz);
         pts.push({
           wx, wz, wh: v.h, depth: p ? p.depth : 0,
@@ -551,14 +485,6 @@ export function drawTerrain(ctx, project, plane) {
     }
     // Each sub-quad takes the average of its four lit corners: with
     // corners shared between neighbours and colours drawn from the
-    // continuous ramp, the eye reads one smooth hillside — no facet
-    // lines on the mountain, no squares on the beach. Distance haze
-    // is mixed into the colour of every corner by its own depth, so
-    // far ground dissolves toward the horizon sky. (v4 faded far
-    // cells with a translucent fill instead; the grown, overlapping
-    // quads then double-painted their shared edges and printed a
-    // wireframe of dark seams across every distant hill. Opaque
-    // paint with the haze inside the colour has no seams to print.)
     const hazed = (p) => {
       const w = sstep(1500, 3500, p.depth) * 0.6;
       return [
@@ -580,13 +506,6 @@ export function drawTerrain(ctx, project, plane) {
         ctx.fillStyle = `rgb(${Math.round((ca[0] + cb[0] + cc[0] + cd[0]) / 4)},${Math.round((ca[1] + cb[1] + cc[1] + cd[1]) / 4)},${Math.round((ca[2] + cb[2] + cc[2] + cd[2]) / 4)})`;
         // Each corner pushed a hair outward from the quad's centre:
         // projected neighbours land on fractional pixels, and an
-        // exact fit leaves hairline seams that print the mesh onto
-        // flat ground like graph paper. The whisker of overlap is
-        // invisible; the seams were not. The common case paints the
-        // four projected corners directly, allocation-free; only a
-        // quad straddling the camera plane — a handful per frame,
-        // all of them under the aeroplane — pays for the
-        // camera-space clip.
         if (a.clip || b.clip || c.clip || d.clip) {
           const poly = project.clipPolygon([
             { x: a.wx, y: a.wh, z: a.wz },
@@ -644,14 +563,6 @@ export function drawTerrain(ctx, project, plane) {
 
 // Trees ride the terrain pass so painter's order keeps them behind
 // nearer hills. Two species by altitude, the way the real
-// archipelago would grow them: broadleaf park trees on the lowlands
-// and coasts, pines only up on Mount Vela's high slopes. Since v7
-// the woods come the way woods do — in patches, not sprinkles: a
-// low-frequency grove chart thickens whole hillsides into forest,
-// the shore fringe crowds the coast just above the sand, trees
-// stand in clusters off both strips' shoulders, and a lone line
-// tree marks the farmland's own hedgerows where a plot boundary
-// crosses an otherwise empty cell.
 function drawCellTrees(ctx, project, cell, kind, steep) {
   if (kind !== 'grass' || cell.h < 9 || cell.h > 165 || steep > 0.6) return;
   const step = WORLD.terrainStep;
@@ -733,8 +644,6 @@ function drawPineTree(ctx, foot, w, hh) {
 
 // The leaf puffs of one broadleaf crown: [across, up, radius] in units
 // of the canopy radius, up measured from the crown's centre. No two
-// puffs share a radius and the rim puffs sit proud of the core, so the
-// silhouette stays as irregular as a real tree's.
 const CANOPY_PUFFS = [
   [0, 0.08, 0.6],
   [-0.52, -0.04, 0.44],
@@ -749,8 +658,6 @@ const CANOPY_PUFFS = [
 
 // A broadleaf tree modelled on a real park tree: a tapered grey-brown
 // trunk that splits into branches, carrying a big rounded crown of
-// clustered leaf puffs in three greens laid down by the sun — a dark
-// underside, a rich mid body, and a bright cap on the sunward top.
 function drawBroadleafTree(ctx, foot, w, hh, jitter) {
   const crownR = w * 1.05 * jitter;
   const crownY = foot.y - hh * 0.72;
@@ -808,8 +715,6 @@ function drawBroadleafTree(ctx, foot, w, hh, jitter) {
   if (hh < 15) {
     // Middle distance — the forest's working range now that the
     // woods are dense: underside, a five-puff body and the lit
-    // caps, without the texture flecks. The crown's read survives;
-    // its arc bill is a third of the full tree's.
     ctx.fillStyle = PALETTE.leafDark;
     for (const [px, py, pr] of CANOPY_PUFFS) {
       if (pr < 0.42) continue;
@@ -988,9 +893,6 @@ export function drawRunways(ctx, project) {
 
 // Porto Lume's housing stock (v7): a small set of wall and roof
 // colours the town walk deals from — limewash white, pale cream,
-// terracotta render and stone grey under terracotta, slate and
-// dark-brown roofs — so the streets vary the way a real town's do
-// without ever leaving the golden-hour grade.
 const TOWN_WALLS = ['#e8dcc3', '#f0e7d2', '#d9a37e', '#b7ad9c'];
 const TOWN_ROOFS = ['#b5542f', '#5d6a72', '#7a4a30'];
 
@@ -1012,9 +914,6 @@ export function drawTown(ctx, project, plane) {
     if (b.some((p) => !p)) continue;
     // The pitched roof, dealt in metres and laid out in screen
     // space from the eaves corners: a ridge running the house's
-    // long axis, raised by the roof's own height — cottages steep,
-    // warehouses shallow. The gable ends and both slopes hang off
-    // these two ridge points.
     const roofH = Math.min(block.w, block.d)
       * (block.type === 'warehouse' ? 0.18 : block.type === 'cottage' ? 0.42 : 0.33);
     const totalH = block.h + roofH;
@@ -1057,11 +956,6 @@ export function drawTown(ctx, project, plane) {
       ctx.fill();
       // Windows with frames: a dark timber frame first, then the
       // glass set into it — at golden hour half the town has its
-      // lamps on, so panes alternate warm amber and dark glass by
-      // the house's own hash. Two-storey houses carry two rows,
-      // cottages and warehouses one. And on its dealt face, a
-      // house gets a door: a dark leaf with a paler step, standing
-      // on the street line at the wall's foot.
       const faceW = Math.hypot(t[j].x - t[i].x, t[j].y - t[i].y);
       const faceH = Math.hypot(b[i].x - t[i].x, b[i].y - t[i].y);
       if (faceW > 24 && faceH > 9) {
@@ -1114,8 +1008,6 @@ export function drawTown(ctx, project, plane) {
     ctx.fill();
     // The roof itself: two slopes off the ridge, the eaves pushed
     // a step past the walls so they throw their thin shadow line,
-    // the sunward slope lit, the lee slope down — and a dark
-    // ridge stroke to finish the silhouette.
     const cxT = { x: (t[0].x + t[2].x) / 2, y: (t[0].y + t[2].y) / 2 };
     const ev = t.map((p) => ({
       x: cxT.x + (p.x - cxT.x) * 1.09,
@@ -1206,8 +1098,6 @@ export function drawLandmarks(ctx, project) {
     }
     // At golden hour the lamp is lit: a warm halo round the head and
     // a long translucent beam laid out over the water it guards —
-    // Gull Rock's sweeps the strait south-east, Porto Lume's points
-    // out to sea south of the harbour.
     const beamDir = mark.name.includes('GULL') ? [0.66, 0.75] : [0.1, 1];
     const bl = 420;
     const bx = mark.x + beamDir[0] * bl;
@@ -1312,15 +1202,6 @@ export function drawClouds(ctx, project, plane, t) {
 
 // --- Birds: the living layer (v7) ---
 // v6's single skein of six gulls read as specks in the screenshots —
-// at contact-sheet size a bird is only a bird if its wingspan runs
-// to ten pixels or better, so the flocks now work routes that bring
-// them within a couple of hundred metres of the cameras a pilot
-// actually flies: one crosses the Ring Run's gate line, one works
-// the Porto Lume shore across the approach, one quarters the home
-// fields by Meridian Field, and two more keep the far sky honest
-// for anyone flying the chart for real. Each flock circles its
-// anchor on a slow ellipse, its birds trailing in a loose vee,
-// wings beating out of phase so the vee ripples instead of marching.
 const BIRD_FLOCKS = [
   { ax: 520, ay: 258, az: 1060, r: 46, speed: 0.02, phase: 3.52, n: 7, span: 4.6 },
   { ax: 2560, ay: 165, az: 2790, r: 60, speed: -0.017, phase: 1.87, n: 6, span: 4.0 },
@@ -1361,10 +1242,6 @@ function drawBirdFlocks(ctx, project, t) {
 
 // One gull at screen point p: a pale body with a grey back, two
 // wings jointed at the shoulder, the outer third of each wing a
-// dark tip. The wings are thick strokes, not hairlines — at ten
-// pixels of span a hairline vanishes, a stroke still reads as a
-// wing. Flap phase lifts the tips through the shoulder line and
-// drops them below it, the way a real gull's beat does.
 function drawBird(ctx, p, spanPx, flap, tilt) {
   const hx = spanPx * 0.5;
   const lift = Math.sin(flap) * spanPx * 0.34;
@@ -1417,8 +1294,6 @@ function drawBird(ctx, p, spanPx, flap, tilt) {
 
 // --- The built world: bridge, boats, road and falls (v6) ---
 // Landmarks a pilot navigates by and a screenshot remembers: the
-// ferry bridge to Pilot Islet, working boats on the sea lanes, the
-// harbour road at Porto Lume, and the falls on Mount Vela's face.
 
 // One projected quad, the brick every feature below is built from.
 // Corners are [x, y, z] world triples; a corner behind the camera
@@ -1435,10 +1310,6 @@ function featureQuad(ctx, project, corners, fill) {
 
 // The Pilot Islet bridge: a suspension span across the strait
 // from Home Isle's north-east shore to the islet — two towers, a
-// sagging main cable each side, hangers, and a lamp-lit deck. The
-// towers and cables carry the read: a suspension silhouette says
-// "bridge" at any range and any angle, where a bare deck seen
-// end-on collapses into a pole.
 export function drawBridge(ctx, project) {
   const A = { x: 628, z: 921 };   // Home Isle shore
   const B = { x: 1115, z: 317 };  // Pilot Islet shore
@@ -1492,9 +1363,6 @@ export function drawBridge(ctx, project) {
   }
   // The suspension work: twin towers at the third points rising
   // seventeen metres over the deck, a crossbar between each pair of
-  // posts, the main cables sagging tower to tower, and hangers
-  // dropping from cable to deck — the silhouette that reads as a
-  // bridge from a mile out.
   const T1 = 0.24;
   const T2 = 0.74;
   const towerTop = (tp) => deckY(tp) + 21;
@@ -1589,17 +1457,6 @@ export function drawBridge(ctx, project) {
 
 // Working boats (v8): the sea is a workplace now, not a backdrop.
 // v6 floated three boats and in stills they read as specks — a boat
-// only reads as a boat at screenshot range if it carries a tall
-// silhouette (a sail, a wheelhouse, a funnel) and a wake long enough
-// to draw the eye. So the fleet runs to thirteen: nine vessels
-// working lanes — a coaster and the Lume ferry crossing the bay the
-// cargo camera flies over, sailboats beating the strait in the
-// cover's view, fishing boats on the coastal runs — and four more
-// moored alongside the two jetties, masts up, riding the bob. Every
-// lane below was sounded against the chart (deepest keel clearance
-// −2.8 m) so no hull ever crosses a shore, and the showcase lanes
-// were phased so their boats sit mid-frame in the first seconds of
-// a flight — the seconds the screenshot scenes live in.
 const BOAT_LANES = [
   { kind: 'coaster', len: 36, ax: 2030, az: 1420, bx: 2280, bz: 1510, speed: 3.2, phase: 0.35, name: 'bay coaster' },
   { kind: 'ferry', len: 26, ax: 1920, az: 1180, bx: 2080, bz: 1520, speed: 3.8, phase: 0.54, name: 'lume ferry' },
@@ -1652,8 +1509,6 @@ function mixHex(a, b, f) {
 
 // One boat, whole: wake (if she is moving), hull shaded side by
 // side against SUN_DIR, then whatever she carries — sails, a cabin,
-// a wheelhouse, hatch covers and a funnel. `pose` is {x, z,
-// heading} plus, for moored boats, a bob phase instead of a wake.
 function drawBoat(ctx, project, boat, pose, t) {
   const rad = (pose.heading * Math.PI) / 180;
   const fx = Math.sin(rad);
@@ -1836,9 +1691,6 @@ export function drawBoats(ctx, project, t = 0) {
 
 // The jetties the moored fleet ties up to: Porto Lume's long wooden
 // pier stepping down its shelving south shore into the harbour, and
-// a short landing stage on Pilot Islet's south shore under the
-// bridge. The deck rides a step above the ground it crosses —
-// beach, then water — on posts, with a lamp at the seaward end.
 const PIERS = [
   { x0: 2610, z0: 3005, x1: 2610, z1: 3200, w: 7, name: 'porto lume pier' },
   { x0: 1250, z0: 368, x1: 1250, z1: 520, w: 5, name: 'pilot islet jetty' },

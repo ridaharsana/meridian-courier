@@ -1,8 +1,9 @@
 // renderer-3d.js — a hand-rolled perspective projector that paints the
 // archipelago on a 2D canvas: sky, sun and cloud shadows first, then the
-// heightfield as flat-shaded facets sorted far to near, then runways, the
-// harbour town, landmarks and the mission rings. One job: turn world
-// coordinates into a picture a pilot can read at a glance.
+// heightfield as a subdivided, vertex-lit mesh over a continuous colour
+// ramp sorted far to near, then runways, the harbour town, landmarks and
+// the mission rings. One job: turn world coordinates into a picture a
+// pilot can read at a glance.
 
 import { WORLD, PALETTE, RUNWAYS } from './config.js';
 import { groundHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
@@ -30,6 +31,184 @@ export function shade(hex, f) {
 export function cellHash(gx, gz) {
   const s = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
   return s - Math.floor(s);
+}
+
+// --- The de-boxed ground: one continuous colour ramp, vertex-lit ---
+// v1–v3 coloured each 130 m cell with a single flat fill picked from
+// hard biome classes, so beaches came out as squares, the sea shelf
+// as flat rectangles and the mountain as plain facets. The ground is
+// now coloured by a ramp that never steps: every vertex of a fine
+// 65 m grid takes its colour from its own height, slope and chart
+// noise, lit by its own surface normal, and each drawn quad averages
+// its corners — slopes shade continuously and biome edges wander
+// with the contours instead of snapping to the grid.
+
+const RGB_CACHE = new Map();
+
+export function hexRgb(hex) {
+  let rgb = RGB_CACHE.get(hex);
+  if (!rgb) {
+    const n = parseInt(hex.slice(1), 16);
+    rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    RGB_CACHE.set(hex, rgb);
+  }
+  return rgb;
+}
+
+function mixRgb(a, b, t) {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+}
+
+// Smoothstep between two edges: the only way colours change here.
+function sstep(a, b, v) {
+  const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+// The ramp itself: sea floor → shelf → shallows → wet sand → dry
+// sand → mottled grass → strata rock → noise-broken snow, every
+// boundary a blend band several metres wide.
+export function terrainBaseRgb(h, slope, x, z) {
+  if (h < 0.4) {
+    // Underwater: the shelf falls away in one gradient, deep
+    // blue-green under the keel to pale turquoise at the lip, then
+    // darkens into wet sand exactly where the water lets go.
+    let c = mixRgb(hexRgb(PALETTE.seaDeep), hexRgb(PALETTE.seaFloor), sstep(-11, -4, h));
+    c = mixRgb(c, hexRgb(PALETTE.seaShelf), sstep(-4.5, -1.2, h));
+    c = mixRgb(c, hexRgb(PALETTE.seaShallow), sstep(-1.4, 0.1, h));
+    return mixRgb(c, hexRgb(PALETTE.sandWet), sstep(-0.1, 0.45, h));
+  }
+  // Sand: wet at the waterline, dry and pale a few metres up. Over
+  // the very lip lies the foam's soft edge — a pale band whose
+  // strength the fine chart noise keeps breaking up, so the waterline
+  // reads as surf, not as a drawn line.
+  let c = mixRgb(hexRgb(PALETTE.sandWet), hexRgb(PALETTE.sandDry), sstep(0.4, 3.4, h));
+  const foamN = 0.5 + 0.5 * chartNoise(x * 2.6, z * 2.6);
+  const foam = (1 - Math.abs(h - 0.65) / 0.95) * (0.3 + 0.55 * foamN);
+  if (foam > 0) c = mixRgb(c, hexRgb(PALETTE.foam), Math.min(0.55, foam));
+  // Grass: two tones married by height, then mottled toward scrub
+  // by the chart noise so no meadow is one flat sheet of green.
+  const g = mixRgb(hexRgb(PALETTE.grassLow), hexRgb(PALETTE.grassHigh), sstep(8, 120, h));
+  const mottle = 0.5 + 0.5 * chartNoise(x * 2.3, z * 2.3);
+  const grass = mixRgb(g, hexRgb(PALETTE.scrub), mottle * 0.45);
+  c = mixRgb(c, grass, sstep(3.8, 8.5, h));
+  // Rock: strata bands that follow the contour lines, their edges
+  // broken by noise, with darker scree flecked through them. Steep
+  // ground gives up its grass and shows rock at any height, and high
+  // ground turns rocky even where it lies gentle.
+  const strata = 0.5 + 0.5 * Math.sin(h * 0.115 + chartNoise(x, z) * 2.4);
+  let rock = mixRgb(hexRgb(PALETTE.rockDark), hexRgb(PALETTE.rock), 0.25 + strata * 0.65);
+  const scree = 0.5 + 0.5 * chartNoise(x * 5.1, z * 5.1);
+  rock = mixRgb(rock, hexRgb(PALETTE.rockDark), scree * 0.22);
+  const rockAmt = Math.max(sstep(0.52, 0.9, slope), sstep(125, 185, h));
+  c = mixRgb(c, rock, rockAmt * sstep(6, 26, h));
+  // Snow: an irregular line the noise pushes up one gully and down
+  // the next, lying deep only where the slope is gentle enough to
+  // hold it, and streaked with blue shadow runs.
+  const snowLine = 272 + chartNoise(x * 1.35, z * 1.35) * 42;
+  const snowAmt = sstep(snowLine - 20, snowLine + 22, h) * (1 - sstep(0.75, 1.25, slope) * 0.7);
+  if (snowAmt > 0) {
+    const streak = 0.5 + 0.5 * chartNoise(x * 3.1, z * 3.1);
+    const snow = mixRgb(hexRgb(PALETTE.snow), hexRgb(PALETTE.snowShade), streak * 0.55);
+    c = mixRgb(c, snow, snowAmt);
+  }
+  // Fine organic mottling, the last word: a noise pass at tens of
+  // metres' wavelength, so flat meadows and beaches carry tonal
+  // patches that wander like real ground — never polished flat, and
+  // never repeating with the grid that draws them.
+  const fine = 0.5 + 0.5 * chartNoise(x * 13.7, z * 13.7);
+  const tone = 0.965 + fine * 0.07;
+  return [c[0] * tone, c[1] * tone, c[2] * tone];
+}
+
+// The fine shading grid: vertices every 65 m (half a terrain cell),
+// their heights and lit colours cached for the length of one frame
+// so neighbouring cells share the very same corner — the mesh has
+// no seams and the colour field has no steps.
+const FINE = WORLD.terrainStep / 2;
+let heightCache = new Map();
+let vertexCache = new Map();
+
+function cacheKey(ix, iz) {
+  return (ix + 512) * 2048 + (iz + 512);
+}
+
+function heightAt(ix, iz) {
+  const k = cacheKey(ix, iz);
+  let h = heightCache.get(k);
+  if (h === undefined) {
+    h = groundHeight(ix * FINE, iz * FINE);
+    heightCache.set(k, h);
+  }
+  return h;
+}
+
+// One grid vertex, fully lit: its normal comes from the heightfield
+// itself (forward differences over the fine step), its colour from
+// the ramp, and a whisper of per-vertex grain — planted by the grid
+// hash — so sand and grass carry speckle instead of polish.
+export function vertexAt(ix, iz) {
+  const k = cacheKey(ix, iz);
+  let v = vertexCache.get(k);
+  if (v) return v;
+  const x = ix * FINE;
+  const z = iz * FINE;
+  const h = heightAt(ix, iz);
+  const dhx = (heightAt(ix + 1, iz) - h) / FINE;
+  const dhz = (heightAt(ix, iz + 1) - h) / FINE;
+  const inv = 1 / Math.hypot(dhx, 1, dhz);
+  const dot = (-dhx * SUN_DIR.x + SUN_DIR.y - dhz * SUN_DIR.z) * inv;
+  const light = 0.62 + 0.55 * Math.max(0, dot);
+  const slope = Math.hypot(dhx, dhz);
+  const base = surfaceKind(x, z, h) === 'runway'
+    ? hexRgb(PALETTE.runway)
+    : terrainBaseRgb(h, slope, x, z);
+  const grain = 0.985 + cellHash(ix * 3 + 11, iz * 3 - 7) * 0.03;
+  const f = light * grain;
+  v = {
+    h,
+    r: Math.min(255, base[0] * f),
+    g: Math.min(255, base[1] * f),
+    b: Math.min(255, base[2] * f),
+  };
+  vertexCache.set(k, v);
+  return v;
+}
+
+// A sample anywhere on the ground: an exact grid vertex when the
+// point lands on the fine grid, otherwise a bilinear blend of the
+// four vertices around it — height and lit colour alike, so a
+// subdivided quad curves with the hill instead of faceting.
+export function samplePoint(wx, wz) {
+  const gx = wx / FINE;
+  const gz = wz / FINE;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  if (fx < 0.002 && fz < 0.002) return vertexAt(ix, iz);
+  const a = vertexAt(ix, iz);
+  const b = vertexAt(ix + 1, iz);
+  const c = vertexAt(ix, iz + 1);
+  const d = vertexAt(ix + 1, iz + 1);
+  const topH = a.h + (b.h - a.h) * fx;
+  const botH = c.h + (d.h - c.h) * fx;
+  const topR = a.r + (b.r - a.r) * fx;
+  const botR = c.r + (d.r - c.r) * fx;
+  const topG = a.g + (b.g - a.g) * fx;
+  const botG = c.g + (d.g - c.g) * fx;
+  const topB = a.b + (b.b - a.b) * fx;
+  const botB = c.b + (d.b - c.b) * fx;
+  return {
+    h: topH + (botH - topH) * fz,
+    r: topR + (botR - topR) * fz,
+    g: topG + (botG - topG) * fz,
+    b: topB + (botB - topB) * fz,
+  };
 }
 
 export function createCamera() {
@@ -145,13 +324,40 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
       ctx.fillRect(p.x, p.y, Math.max(1.5, p.scale * (onPath ? 9 : 6)), 1.4);
     }
   }
+  // Swell: long low bands of light rolling across the water, drawn
+  // as dashed projected lines ahead of the camera so they lie on the
+  // sea's own surface, foreshorten with distance and break up the
+  // last of the flat open-water sheet.
+  const fxw = Math.sin(camera.heading);
+  const fzw = -Math.cos(camera.heading);
+  const rxw = -fzw;
+  const rzw = fxw;
+  ctx.lineWidth = 1.3;
+  ctx.setLineDash([26, 34]);
+  for (let k = 0; k < 9; k++) {
+    const d = 300 + k * 330 + (k % 3) * 80;
+    ctx.strokeStyle = `rgba(214,240,248,${0.085 - k * 0.006})`;
+    ctx.beginPath();
+    let pen = false;
+    for (let sgm = -4; sgm <= 4; sgm++) {
+      const off = sgm * d * 0.3;
+      const p = project(
+        camera.x + fxw * d + rxw * off, 0,
+        camera.z + fzw * d + rzw * off);
+      if (p && p.y > horizon) {
+        if (!pen) { ctx.moveTo(p.x, p.y); pen = true; } else ctx.lineTo(p.x, p.y);
+      } else pen = false;
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
 }
 
-const KIND_FILL = {
-  sand: PALETTE.sand, grass: null, rock: PALETTE.rock, snow: PALETTE.snow,
-};
-
 export function drawTerrain(ctx, project, plane) {
+  // Fresh shading caches for this frame: the vertex grid is anchored
+  // to the world, so a vertex keeps its colour as the camera moves.
+  heightCache = new Map();
+  vertexCache = new Map();
   const step = WORLD.terrainStep;
   const R = WORLD.terrainRadius;
   const gx0 = Math.floor((plane.x - R) / step);
@@ -164,7 +370,7 @@ export function drawTerrain(ctx, project, plane) {
       const x = gx * step;
       const z = gz * step;
       const h = groundHeight(x + step / 2, z + step / 2);
-      if (h < -9) continue; // deep water is the sea's job; the shelf is ours
+      if (h < -12.5) continue; // only the true abyss is the flat sea's job
       const dx = x + step / 2 - plane.x;
       const dz = z + step / 2 - plane.z;
       cells.push({ x, z, h, d2: dx * dx + dz * dz });
@@ -172,40 +378,71 @@ export function drawTerrain(ctx, project, plane) {
   }
   cells.sort((a, b) => b.d2 - a.d2);
   for (const cell of cells) {
-    // Haze: far facets fade toward the sky so the chart's edge dissolves
+    // Haze: far ground fades toward the sky so the chart's edge dissolves
     // instead of ending in a confetti of grazing-angle slivers.
     ctx.globalAlpha = Math.max(0.42, Math.min(1, 1.18 - Math.sqrt(cell.d2) / 3600));
-    // Corner heights, not one flat height per cell: neighbouring cells
-    // share the same corner samples, so the mesh is continuous — no
-    // see-through gaps on steep slopes, no floating tiles.
-    const s = step + 1;
-    const h1 = groundHeight(cell.x, cell.z);
-    const h2 = groundHeight(cell.x + s, cell.z);
-    const h3 = groundHeight(cell.x + s, cell.z + s);
-    const h4 = groundHeight(cell.x, cell.z + s);
-    const p1 = project(cell.x, h1, cell.z);
-    const p2 = project(cell.x + s, h2, cell.z);
-    const p3 = project(cell.x + s, h3, cell.z + s);
-    const p4 = project(cell.x, h4, cell.z + s);
-    if (!p1 || !p2 || !p3 || !p4) continue;
+    // Adaptive subdivision: the ground under the aeroplane is cut
+    // four ways, the mid-distance two, the far hills left whole —
+    // the mesh is finest exactly where a pilot's eye can measure it,
+    // and the frame rate never pays for detail nobody can see.
+    const dist = Math.sqrt(cell.d2);
+    const n = dist < 620 ? 4 : dist < 2400 ? 2 : 1;
+    const pts = [];
+    for (let j = 0; j <= n; j++) {
+      for (let i = 0; i <= n; i++) {
+        const wx = cell.x + (step * i) / n;
+        const wz = cell.z + (step * j) / n;
+        const v = samplePoint(wx, wz);
+        const p = project(wx, v.h, wz);
+        pts.push(p ? { x: p.x, y: p.y, r: v.r, g: v.g, b: v.b } : null);
+      }
+    }
+    // Each sub-quad takes the average of its four lit corners: with
+    // corners shared between neighbours and colours drawn from the
+    // continuous ramp, the eye reads one smooth hillside — no facet
+    // lines on the mountain, no squares on the beach.
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const a = pts[j * (n + 1) + i];
+        const b = pts[j * (n + 1) + i + 1];
+        const c = pts[(j + 1) * (n + 1) + i + 1];
+        const d = pts[(j + 1) * (n + 1) + i];
+        if (!a || !b || !c || !d) continue;
+        ctx.fillStyle = `rgb(${Math.round((a.r + b.r + c.r + d.r) / 4)},${Math.round((a.g + b.g + c.g + d.g) / 4)},${Math.round((a.b + b.b + c.b + d.b) / 4)})`;
+        // Each corner pushed a hair outward from the quad's centre:
+        // projected neighbours land on fractional pixels, and an
+        // exact fit leaves hairline seams that print the mesh onto
+        // flat ground like graph paper. The whisker of overlap is
+        // invisible; the seams were not.
+        const cx = (a.x + b.x + c.x + d.x) / 4;
+        const cy = (a.y + b.y + c.y + d.y) / 4;
+        const grow = (p) => {
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          const len = Math.hypot(dx, dy) || 1;
+          return [p.x + (dx / len) * 0.7, p.y + (dy / len) * 0.7];
+        };
+        const [ax, ay] = grow(a);
+        const [bx, by] = grow(b);
+        const [qx, qy] = grow(c);
+        const [dx2, dy2] = grow(d);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(qx, qy);
+        ctx.lineTo(dx2, dy2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
     const kind = surfaceKind(cell.x + step / 2, cell.z + step / 2, cell.h);
-    // Slope from the corner heights: the face normal against SUN_DIR
-    // gives one light factor for the whole facet, so hillsides facing
-    // the sun glow and the lee sides sit in honest shade.
-    const dhx = ((h2 + h3) - (h1 + h4)) / (2 * step);
-    const dhz = ((h3 + h4) - (h1 + h2)) / (2 * step);
-    const inv = 1 / Math.hypot(dhx, 1, dhz);
-    const dot = (-dhx * SUN_DIR.x + SUN_DIR.y - dhz * SUN_DIR.z) * inv;
-    const light = 0.62 + 0.55 * Math.max(0, dot);
+    // Slope for the tree planter, from the fine grid's own heights.
+    const fi = Math.round(cell.x / FINE);
+    const fj = Math.round(cell.z / FINE);
+    const e = 2; // one coarse cell = two fine steps
+    const dhx = ((heightAt(fi + e, fj) + heightAt(fi + e, fj + e)) - (heightAt(fi, fj) + heightAt(fi, fj + e))) / (2 * step);
+    const dhz = ((heightAt(fi, fj + e) + heightAt(fi + e, fj + e)) - (heightAt(fi, fj) + heightAt(fi + e, fj))) / (2 * step);
     const steep = Math.hypot(dhx, dhz);
-    ctx.fillStyle = shadeFor(kind, cell.h, cell.x, cell.z, light, steep);
-    ctx.beginPath();
-    ctx.moveTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
-    ctx.lineTo(p3.x, p3.y);
-    ctx.lineTo(p4.x, p4.y);
-    ctx.closePath();
-    ctx.fill();
     drawCellTrees(ctx, project, cell, kind, steep);
   }
   ctx.globalAlpha = 1;
@@ -379,25 +616,6 @@ function drawBroadleafTree(ctx, foot, w, hh, jitter) {
     ctx.arc(foot.x + (px + 0.2) * crownR, crownY - (py + 0.24) * crownR, pr * crownR * 0.3, 0, Math.PI * 2);
     ctx.fill();
   }
-}
-
-function shadeFor(kind, h, x, z, light, steep) {
-  if (kind === 'runway') return PALETTE.runway;
-  if (h < 0.5) return shade(PALETTE.seaShallow, light); // the shoreline shelf
-  if (kind === 'sand') return shade(h < 2.4 ? PALETTE.sandWet : PALETTE.sand, light);
-  if (kind === 'snow') {
-    // Snowfields break into streaks: the chart noise lays soft blue
-    // shadow runs down the mountain instead of one white slab.
-    const streak = chartNoise(x * 0.7, z * 0.7);
-    return shade(streak > 0.28 ? PALETTE.snowShade : PALETTE.snow, light);
-  }
-  // Steep grass gives up and shows rock, the way real hillsides do.
-  if (steep > 0.62 && h > 42) return shade(steep > 0.95 ? PALETTE.rockDark : PALETTE.rock, light);
-  if (KIND_FILL[kind]) return shade(KIND_FILL[kind], light);
-  // Grass takes two tones by height so slopes read as slopes.
-  const tone = ((Math.floor(x / 130) + Math.floor(z / 130)) % 2 + 2) % 2;
-  if (h < 60) return shade(tone ? PALETTE.grassLow : '#84b166', light);
-  return shade(tone ? PALETTE.grassHigh : '#57884a', light);
 }
 
 export function drawRunways(ctx, project) {

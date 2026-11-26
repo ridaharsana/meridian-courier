@@ -53,10 +53,18 @@ export const PALETTE = {
   sea: '#1d6f8e',
   seaDeep: '#124e6a',
   seaShallow: '#3a97a8',
+  // The de-boxed shore: the underwater shelf falls from a pale
+  // turquoise lip through a mid shelf tone to the deep floor colour,
+  // and the beach itself runs wet → dry with a soft foam edge.
+  seaShelf: '#2f8aa5',
+  seaFloor: '#155e7d',
   sand: '#e6d194',
+  sandDry: '#eed9a0',
   sandWet: '#cbb37e',
+  foam: '#f8f4e4',
   grassLow: '#79a95c',
   grassHigh: '#4d7d43',
+  scrub: '#5d8a4c',
   treeDark: '#2e5d33',
   treeLight: '#4c8148',
   // Broadleaf tones, taken from a real park tree's crown: a grey-brown

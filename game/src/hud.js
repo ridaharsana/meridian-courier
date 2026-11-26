@@ -1,5 +1,4 @@
-// hud.js — everything the pilot reads that is not an instrument: the big
-// ALTITUDE / SPEED / HEADING digits, the mission banner and objective
+// hud.js — HUD digits, mission banner and event callouts.
 
 import { PALETTE, WORLD, CONTROLS_TEXT } from './config.js';
 import { headingDegrees } from './flight-model.js';
@@ -12,7 +11,6 @@ export function drawHudDigits(ctx, plane, width, height) {
   chip(ctx, width * 0.5 - 268, 14, 'ALTITUDE', `${feet} FT`);
   chip(ctx, width * 0.5 - 88, 14, 'SPEED', `${knots} KT`);
   chip(ctx, width * 0.5 + 92, 14, 'HEADING', `${String(hdg).padStart(3, '0')}°`);
-  // Vertical speed tucked under altitude: the number landings are made of.
   const vs = Math.round(plane.vertical * 196.85);
   ctx.fillStyle = 'rgba(8,12,17,0.72)';
   ctx.fillRect(width * 0.5 - 268, 64, 168, 24);
@@ -42,15 +40,32 @@ function chip(ctx, x, y, label, value) {
   ctx.fillText(value, x + 84, y + 39);
 }
 
-export function drawMissionBanner(ctx, state, plane, width) {
+// Ease-out cubic for entrances: fast arrival, gentle landing.
+function easeOutCubic(x) {
+  return 1 - Math.pow(1 - x, 3);
+}
+
+// Ease-out-back for emphasis pops: overshoots, then settles.
+function easeOutBack(x) {
+  const c1 = 1.70158;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+}
+
+export function drawMissionBanner(ctx, state, plane, width, entrance = 1) {
   const m = state.mission;
+  // Sortie entrance: the banner slides down and fades in over the
+  // first 0.6 s (ease-out), then sits still for the rest of the day.
+  const e = easeOutCubic(Math.max(0, Math.min(1, entrance)));
+  ctx.save();
+  ctx.globalAlpha = e;
+  ctx.translate(0, (1 - e) * -16);
   ctx.fillStyle = 'rgba(8,12,17,0.66)';
   ctx.fillRect(width * 0.5 - 300, 96, 600, 30);
   ctx.fillStyle = PALETTE.lampAmber;
   ctx.font = '700 14px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(m.title, width * 0.5, 116);
-  // Objective cue: label, distance, and an arrow that swings to the turn.
   const cue = objectiveCue(state, plane);
   const mins = Math.floor(state.elapsed / 60);
   const secs = String(Math.floor(state.elapsed % 60)).padStart(2, '0');
@@ -67,6 +82,7 @@ export function drawMissionBanner(ctx, state, plane, width) {
   ctx.beginPath();
   ctx.moveTo(0, -9); ctx.lineTo(5.5, 6); ctx.lineTo(0, 2.6); ctx.lineTo(-5.5, 6);
   ctx.closePath(); ctx.fill();
+  ctx.restore();
   ctx.restore();
 }
 
@@ -90,16 +106,24 @@ export function drawCentreMarker(ctx, plane, width, height) {
   }
 }
 
-export function drawEventFlash(ctx, text, sub, width, height, alpha) {
+export function drawEventFlash(ctx, text, sub, width, height, alpha, age = 9) {
   ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  // Entry pops with ease-out-back over 0.35 s; the exit fade the
+  // caller passes is eased in (alpha squared) so it leaves firmly.
+  const fade = Math.max(0, Math.min(1, alpha));
+  ctx.globalAlpha = fade * fade;
+  const pop = easeOutBack(Math.max(0, Math.min(1, age / 0.35)));
+  ctx.translate(width / 2, height * 0.3);
+  // The pop arrives from a breath below, following through upward.
+  ctx.translate(0, (1 - pop) * 9);
+  ctx.scale(pop, pop);
   ctx.fillStyle = PALETTE.lampGreen;
   ctx.font = '800 34px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(text, width / 2, height * 0.3);
+  ctx.fillText(text, 0, 0);
   ctx.fillStyle = '#eef4f8';
   ctx.font = '600 16px system-ui, sans-serif';
-  ctx.fillText(sub, width / 2, height * 0.3 + 28);
+  ctx.fillText(sub, 0, 28);
   ctx.restore();
 }
 

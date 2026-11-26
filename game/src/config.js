@@ -1,5 +1,4 @@
-// config.js — Meridian Courier: every named place, tuning constant and colour
-// of the Skyferry Archipelago lives here, so the rest of the game reads like a
+// config.js — every named place, tuning constant and colour.
 
 export const WORLD = {
   seaLevel: 0,
@@ -11,8 +10,6 @@ export const WORLD = {
   daySub: 'Skyferry Archipelago — est. 1962',
 };
 
-// The archipelago: x east, z south, heights in metres. Each island carries a
-// gaussian peak; runways sit on flattened plateaus carved by terrain.js.
 export const ISLANDS = [
   { name: 'MERIDIAN HOME ISLE', x: 0, z: 1700, radius: 980, peak: 150, town: false },
   { name: 'CORAL CAY', x: -2300, z: 500, radius: 620, peak: 84, town: false },
@@ -20,13 +17,9 @@ export const ISLANDS = [
   { name: 'PORTO LUME', x: 2500, z: 2300, radius: 780, peak: 118, town: true },
   { name: 'GULL ROCK', x: -1700, z: -1900, radius: 470, peak: 66, town: false },
   { name: 'FARREL SHOAL', x: 700, z: -2700, radius: 560, peak: 74, town: false },
-  // A low islet in the strait north-east of Home Isle, close enough
-  // that the ferry road bridges to it: the archipelago's one bridge,
   { name: 'PILOT ISLET', x: 1250, z: 150, radius: 300, peak: 34, town: false },
 ];
 
-// Runway plateaus: centre, heading of the strip (degrees, direction of travel
-// on final), length and the flat altitude the terrain is carved to.
 export const RUNWAYS = [
   { id: 'HOME', name: 'MERIDIAN FIELD 09', x: 0, z: 1700, heading: 90, length: 760, width: 46, altitude: 24 },
   { id: 'LUME', name: 'PORTO LUME STRIP 36', x: 2500, z: 2300, heading: 0, length: 640, width: 40, altitude: 20 },
@@ -47,8 +40,6 @@ export const AIRCRAFT = {
 };
 
 export const PALETTE = {
-  // Golden hour (v6): the whole chart is graded late-afternoon — a
-  // deep blue zenith over a warm amber horizon, a low warm sun, and
   skyTop: '#26457e',
   skyMid: '#7e9cc0',
   skyLow: '#f8c47c',
@@ -57,8 +48,6 @@ export const PALETTE = {
   sea: '#1a637f',
   seaDeep: '#0f435c',
   seaShallow: '#4599a4',
-  // The de-boxed shore: the underwater shelf falls from a pale
-  // turquoise lip through a mid shelf tone to the deep floor colour,
   seaShelf: '#2f869e',
   seaFloor: '#145a76',
   sand: '#eecf92',
@@ -68,8 +57,6 @@ export const PALETTE = {
   grassLow: '#8ba85e',
   grassHigh: '#527a3e',
   scrub: '#648347',
-  // The worked lowlands: crop tones a pilot reads as farmland from
-  // pattern altitude — ripe wheat, young crop, deep pasture, fresh
   cropWheat: '#c8ad55',
   cropYoung: '#7cab4a',
   cropDeep: '#4f7d38',
@@ -77,13 +64,9 @@ export const PALETTE = {
   cropFallow: '#b5a26e',
   hedge: '#33512e',
   dirt: '#b3986a',
-  // Distance haze: far ground, far sea and the horizon itself all
-  // lean toward this one warm pale tone — golden-hour air is dusty,
   haze: '#d8c39a',
   treeDark: '#2e5d33',
   treeLight: '#4c8148',
-  // Broadleaf tones, taken from a real park tree's crown: a grey-brown
-  // trunk, a deep shaded underside, a rich mid green for the body of
   trunk: '#6d5942',
   trunkShade: '#463727',
   leafDark: '#27512a',

@@ -1,5 +1,4 @@
-// flight-model.js — how the Petrel flies: throttle, lift, stall, banked
-// turns, wind, fuel and hull. One job: step the aircraft state forward and
+// flight-model.js — how the Petrel flies: step the aircraft state.
 
 import { AIRCRAFT, WORLD } from './config.js';
 import { groundHeight, runwayFrame } from './terrain-archipelago.js';
@@ -27,45 +26,37 @@ export function headingDegrees(plane) {
 
 export function stepFlight(plane, input, dt) {
   const P = AIRCRAFT;
-  // Throttle lever, with the engine spooling rather than snapping.
   plane.throttle = clamp(plane.throttle + input.throttleDelta * P.throttleRate * dt * 3, 0, 1);
   if (input.throttleSet !== null) plane.throttle = clamp(input.throttleSet, 0, 1);
 
-  // Stick: pitch and roll ease toward the commanded attitude.
   const targetRoll = input.roll * 1.05;
   plane.roll += (targetRoll - plane.roll) * Math.min(1, dt * 5.2);
   const speedFactor = clamp(plane.speed / 40, 0.25, 1);
   plane.pitch += (input.pitch * P.pitchRate * speedFactor - plane.pitch * 1.4) * dt * 2.2;
   plane.pitch = clamp(plane.pitch, -0.5, 0.42);
 
-  // A banked wing turns the aeroplane; a rudder nudges it. Slow flight
-  // turns lazily, fast flight carves — turn discipline is the game.
   const turnRate = Math.sin(plane.roll) * 0.62 * clamp(plane.speed / 46, 0, 1.15)
     + input.yaw * P.yawRate * speedFactor;
   plane.heading += turnRate * dt;
 
-  // Airspeed: thrust against drag, gravity trading along the flight path.
   const thrust = plane.throttle * 13.5;
   const drag = 0.0038 * plane.speed * plane.speed + (plane.gearDown ? 1.1 : 0.25);
   const slope = -Math.sin(plane.pitch) * WORLD.gravity * 0.82;
   plane.speed += (thrust - drag + slope) * dt * (plane.onGround ? 0.62 : 1);
   plane.speed = clamp(plane.speed, 0, P.maxSpeed + 26);
 
-  // Lift and sink: below the stall the wing stops holding the nose up.
   plane.stalled = !plane.onGround && plane.speed < P.stallSpeed;
   let climb = Math.sin(plane.pitch) * plane.speed;
   if (plane.stalled) climb -= (P.stallSpeed - plane.speed) * 0.55;
   climb -= plane.onGround ? climb : 0;
   plane.vertical += (climb - plane.vertical) * Math.min(1, dt * 3.4);
 
-  // Advance through the air, then let the wind have its say.
   plane.x += Math.sin(plane.heading) * plane.speed * dt + plane.windX * dt;
   plane.z += -Math.cos(plane.heading) * plane.speed * dt + plane.windZ * dt;
   plane.y += plane.vertical * dt;
 
   plane.propSpin += dt * (2 + plane.throttle * 46 + plane.speed * 0.22);
 
-  // Fuel: a working engine drinks; an empty tank glides.
   if (plane.throttle > 0.02 && plane.fuel > 0) {
     plane.fuel = Math.max(0, plane.fuel - plane.throttle * P.fuelBurnFull * dt);
   }
@@ -81,8 +72,6 @@ function judgeGroundContact(plane, input, dt) {
     plane.onGround = false;
     return event;
   }
-  // Contact. Only an aeroplane that was truly airborne gets its arrival
-  // judged: one already rolling follows the ground over bumps and dips
   const wasAirborne = !plane.onGround;
   const sink = -plane.vertical;
   const runway = RUNWAYS.find((r) => {
@@ -98,7 +87,6 @@ function judgeGroundContact(plane, input, dt) {
     return event;
   }
   if (wasAirborne && sink >= 1.2) {
-    // A touchdown worth judging.
     const aligned = runway
       ? Math.abs(angleDiff(headingDegrees(plane), runway.heading)) < 24
         || Math.abs(angleDiff(headingDegrees(plane), (runway.heading + 180) % 360)) < 24
@@ -118,8 +106,6 @@ function judgeGroundContact(plane, input, dt) {
   plane.onGround = true;
   plane.vertical = 0;
   if (plane.pitch < 0) plane.pitch *= 0.4;
-  // Rolling: brakes and grass both slow her; a held-back stick at speed
-  // lifts her off again — the takeoff is the pilot's decision.
   if (input.brakes) plane.speed = Math.max(0, plane.speed - 16 * dt);
   if (!runway) plane.speed = Math.max(0, plane.speed - 3.2 * dt);
   if (plane.speed > AIRCRAFT.stallSpeed + 4 && plane.pitch > 0.1) {

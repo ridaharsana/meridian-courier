@@ -1,5 +1,4 @@
-// audio.js — a WebAudio panel of small synthesised sounds, no audio files:
-// the engine's putter rising with throttle, wind over the airframe, a
+// audio.js — WebAudio synthesised sounds, no audio files.
 
 export function createAudio() {
   return { ctx: null, engine: null, engineGain: null, wind: null, windGain: null, started: false };
@@ -10,7 +9,6 @@ export function startAudio(audio) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     audio.ctx = ctx;
-    // Engine: a sawtooth through a low-pass, pitch and volume off throttle.
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.value = 52;
@@ -24,7 +22,6 @@ export function startAudio(audio) {
     audio.engine = osc;
     audio.engineFilter = filter;
     audio.engineGain = gain;
-    // Wind: filtered noise, swelling with airspeed.
     const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;

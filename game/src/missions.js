@@ -1,5 +1,4 @@
-// missions.js — the day's work for the Meridian Courier: three sorties
-// with different goals, the rings they fly through, the wind they fight
+// missions.js — three sorties, their rings and wind.
 
 import { RUNWAYS } from './config.js';
 import { angleDiff } from './flight-model.js';
@@ -8,8 +7,6 @@ function ring(x, y, z, heading) {
   return { x, y, z, heading, radius: 42, passed: false };
 }
 
-// Ring courses are laid along a heading from a start point: honest
-// geometry, so a course can be read off the chart and flown by eye.
 function ringCourse(x, z, y, headingDeg, count, gap) {
   const rad = (headingDeg * Math.PI) / 180;
   const fx = Math.sin(rad);
@@ -81,8 +78,6 @@ export function nextRing(state) {
   return state.mission.rings.find((r) => !r.passed) || null;
 }
 
-// Called every step: checks gate crossings in the plane's own frame, so a
-// ring only counts when the aeroplane truly threads it, not flies past it.
 export function updateMission(state, plane, dt, events) {
   if (state.complete || state.failed) return;
   state.elapsed += dt;
@@ -144,8 +139,6 @@ function finishSortie(state, plane, rating) {
   state.verdict = rating.label;
 }
 
-// The steering cue: bearing and distance to whatever the sortie wants
-// next — the next gate, or the target strip's threshold.
 export function objectiveCue(state, plane) {
   const target = nextRing(state);
   if (target) return cueTo(plane, target.x, target.z, `GATE ${state.ringsPassed + 1}/${state.mission.rings.length}`);

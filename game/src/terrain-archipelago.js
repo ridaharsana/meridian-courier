@@ -1,10 +1,7 @@
-// terrain-archipelago.js — the heightfield of the Skyferry Archipelago.
-// One job: answer "how high is the ground at (x, z)?" and describe the
+// terrain-archipelago.js — the archipelago heightfield.
 
 import { ISLANDS, RUNWAYS } from './config.js';
 
-// Deterministic hash noise: the same chart every flight, no Math.random in
-// the terrain, so a ridge a pilot learns stays where they learned it.
 export function chartNoise(x, z) {
   const s = Math.sin(x * 0.0011 + z * 0.0017) * 0.5
     + Math.sin(x * 0.0043 - z * 0.0029) * 0.3
@@ -22,8 +19,6 @@ export function islandHeight(island, x, z) {
   return -14 + (island.peak + 14) * dome * ridge;
 }
 
-// Distance along / across a runway's centreline, for plateau carving and
-// for the flight model's touchdown judgement.
 export function runwayFrame(runway, x, z) {
   const rad = (runway.heading * Math.PI) / 180;
   const fx = Math.sin(rad);
@@ -69,8 +64,6 @@ export function surfaceKind(x, z, h) {
   return 'snow';
 }
 
-// The harbour town of Porto Lume: a fixed grid of houses on the island's
-// flat south shore, generated once from a seeded walk so it never moves.
 export const TOWN_BLOCKS = buildTownBlocks();
 
 function buildTownBlocks() {
@@ -86,8 +79,6 @@ function buildTownBlocks() {
       if (next() < 0.22) continue; // a gap: the plaza, the church green
       const x = lume.x + gx * 86 + (next() - 0.5) * 22;
       const z = lume.z + 250 + gz * 80 + (next() - 0.5) * 18;
-      // Since v7 a block is a house, not a box: the walk now also
-      // deals its kind (a low cottage, a two-storey house, or one
       const typeRoll = next();
       const type = gz === 0 && typeRoll < 0.3 ? 'warehouse'
         : typeRoll < 0.52 ? 'cottage' : 'house';
@@ -110,8 +101,6 @@ function buildTownBlocks() {
   return blocks;
 }
 
-// The lighthouse on Gull Rock and the harbour beacon: two landmarks a pilot
-// navigates by, tall enough to read from the far side of the map.
 export const LANDMARKS = [
   { name: 'GULL ROCK LIGHT', x: -1700, z: -1900, height: 46 },
   { name: 'PORTO LUME BEACON', x: 2980, z: 2680, height: 34 },

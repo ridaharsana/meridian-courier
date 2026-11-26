@@ -1,5 +1,4 @@
-// main.js — Meridian Courier's frame: owns the canvas, the clock and the
-// order of a frame. Flight physics step, mission watch, camera settle,
+// main.js — owns the canvas, the clock and the order of a frame.
 
 import { createInput, attachInput, readInput } from './input.js';
 import { createGame, startSortie, handleToggle, endSortie, PHASES } from './game-state.js';
@@ -18,6 +17,10 @@ import {
 } from './hud.js';
 import { createAudio, startAudio, updateAudio, playGateChime, playTouchdownBell, playStallWarning } from './audio.js';
 import { applyShotScene } from './shots.js';
+import {
+  createParticlePool, spawnRingBurst, spawnWingtipTrail, spawnPropwashDust,
+  seedShotJuice, updateParticles, drawParticles,
+} from './juice-particles.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -26,12 +29,17 @@ attachInput(input, canvas);
 const audio = createAudio();
 const camera = createCamera();
 const game = createGame();
+const juicePool = createParticlePool();
+let frameDt = 0.016;
 
 const params = new URLSearchParams(location.search);
 const shotName = params.get('shot');
 const shotMode = Boolean(shotName);
 if (shotMode) {
   applyShotScene(game, shotName);
+  if (game.juiceSeed) {
+    seedShotJuice(juicePool, game.juiceSeed, game.plane, game.missionState.mission.rings[1]);
+  }
   snapCamera();
 } else {
   game.phase = PHASES.TITLE;
@@ -47,6 +55,7 @@ let stallBeepAt = 0;
 
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
+  frameDt = dt;
   last = now;
   const t = now / 1000;
   const frameInput = readInput(input);
@@ -54,7 +63,6 @@ function frame(now) {
     startAudio(audio);
     handleToggle(game, toggle);
     if (toggle === 'confirm' && game.phase === PHASES.BRIEF) {
-      // Briefing dismissed by the same press that throttles up.
     }
   }
   if (game.phase === PHASES.BRIEF && (frameInput.throttleDelta > 0 || frameInput.throttleSet)) {
@@ -76,6 +84,11 @@ function frame(now) {
   if (shotMode) {
     // Posed but alive: prop turning, lamps lit, a breath of bank.
     game.plane.propSpin += dt * 30;
+    // Seeded juice ages in slow motion so a still catches it mid-act.
+    updateParticles(juicePool, dt * 0.22);
+  } else if (game.phase === PHASES.FLY && !game.paused) {
+    updateParticles(juicePool, dt);
+    if (!game.plane.onGround) spawnWingtipTrail(juicePool, game.plane, dt);
   }
 
   if (game.cameraMode === 'cockpit') cockpitCamera(camera, game.plane);
@@ -93,20 +106,22 @@ function missionEventsToGameEvents(missionEvents, groundEvent) {
 }
 
 function collectMissionEvents(game, missionEvents, ringsBefore, t) {
-  // Ring events arrive through updateMission's own event list in
-  // missions.js' contract: re-derive the flash from the count change.
   if (game.missionState.ringsPassed > ringsBefore) {
     const clean = true;
     game.flash = {
       text: `GATE ${game.missionState.ringsPassed} — THROUGH`,
       sub: clean ? 'Clean through the hoop' : 'Through, with paint traded',
       until: t + 1.6,
+      start: t,
     };
+    const flown = game.missionState.mission.rings[ringsBefore];
+    if (flown) spawnRingBurst(juicePool, flown.x, flown.y, flown.z);
     playGateChime(audio, clean);
   }
   const td = missionEvents.find((e) => e.kind === 'touchdown');
   if (td && td.rating) {
-    game.flash = { text: 'TOUCHDOWN', sub: td.rating.label, until: t + 2.4 };
+    game.flash = { text: 'TOUCHDOWN', sub: td.rating.label, until: t + 2.4, start: t };
+    spawnPropwashDust(juicePool, game.plane);
     playTouchdownBell(audio, td.rating.score >= 55);
   }
   if (game.plane.stalled && t > stallBeepAt) {
@@ -127,30 +142,29 @@ function render(t) {
   drawTown(ctx, project, plane);
   drawRunways(ctx, project);
   drawLandmarks(ctx, project);
-  // The built world of v6: the Pilot Islet bridge, working boats
-  // and the harbour road — the landmarks that make the chart a
   drawBridge(ctx, project);
   drawPier(ctx, project);
   drawBoats(ctx, project, t);
   drawHarbourRoad(ctx, project);
-  // Mission rings, the next one pulsing green.
   const upcoming = nextRing(game.missionState);
   for (const ring of game.missionState.mission.rings) {
     if (ring.passed) continue;
     drawRing(ctx, project, ring, ring === upcoming, Math.sin(t * 5) * 0.5 + 0.5);
   }
+  drawParticles(ctx, juicePool, project);
   drawAircraftShadow(ctx, project, plane);
   if (game.cameraMode === 'cockpit') {
     drawCockpitFrame(ctx, width, height, plane);
   } else {
     drawChaseAircraft(ctx, plane, width, height, t, project, camera);
   }
-  drawInstrumentPanel(ctx, plane, width, height, game.cameraMode);
+  drawInstrumentPanel(ctx, plane, width, height, game.cameraMode, frameDt);
   drawHudDigits(ctx, plane, width, height);
-  drawMissionBanner(ctx, game.missionState, plane, width);
+  drawMissionBanner(ctx, game.missionState, plane, width, shotMode ? 1 : Math.min(1, game.missionState.elapsed / 0.6));
   drawCentreMarker(ctx, plane, width, height);
   if (game.flash && t < game.flash.until) {
-    drawEventFlash(ctx, game.flash.text, game.flash.sub, width, height, game.flash.until - t);
+    drawEventFlash(ctx, game.flash.text, game.flash.sub, width, height,
+      Math.min(1, (game.flash.until - t) / 0.45), t - (game.flash.start || 0));
   }
   if (game.phase === PHASES.TITLE) drawTitleScreen(ctx, width, height);
   if (game.phase === PHASES.BRIEF) drawBriefing(ctx, game.missionState, width, height);

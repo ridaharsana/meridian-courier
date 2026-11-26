@@ -1,12 +1,24 @@
-// instruments.js — the lit panel: attitude indicator, altimeter, airspeed
-// dial, compass ribbon, vertical speed and the throttle / fuel / hull
+// instruments.js — the lit panel.
 
 import { PALETTE } from './config.js';
 import { headingDegrees } from './flight-model.js';
 
 const COMPASS_POINTS = ['N', '03', '06', 'E', '12', '15', 'S', '21', '24', 'W', '30', '33'];
 
-export function drawInstrumentPanel(ctx, plane, width, height, mode) {
+// Needle springs (Playful archetype): each gauge keeps a spring state
+// and chases its true value with roughly ten percent overshoot, so the
+// needles feel flown — they swing, settle, and tremble like real ones.
+const needleSpringStates = { altFeet: { x: null, v: 0 }, speedKt: { x: null, v: 0 } };
+
+export function springNeedle(state, target, dt) {
+  if (state.x === null) { state.x = target; state.v = 0; return target; }
+  const step = Math.min(dt || 0.016, 0.05);
+  state.v += ((target - state.x) * 110 - state.v * 13) * step;
+  state.x += state.v * step;
+  return state.x;
+}
+
+export function drawInstrumentPanel(ctx, plane, width, height, mode, dt = 0.016) {
   const inCockpit = mode === 'cockpit';
   const u = inCockpit ? Math.min(width, height) / 5.4 : Math.min(width, height) / 8.6;
   const baseY = height - u * 0.62;
@@ -16,16 +28,14 @@ export function drawInstrumentPanel(ctx, plane, width, height, mode) {
   const rightX = inCockpit ? width * 0.70 : width - u * 0.95;
 
   drawAttitudeIndicator(ctx, plane, leftX, cy, u * 0.52);
-  drawAltimeter(ctx, plane, midX - u * 0.78, cy, u * 0.52);
-  drawAirspeedDial(ctx, plane, midX + u * 0.78, cy, u * 0.52);
+  drawAltimeter(ctx, plane, midX - u * 0.78, cy, u * 0.52, dt);
+  drawAirspeedDial(ctx, plane, midX + u * 0.78, cy, u * 0.52, dt);
   drawCompassRibbon(ctx, plane, midX, inCockpit ? height * 0.665 : 196, u * 2.3);
   drawThrottleFuelHull(ctx, plane, rightX, cy, u);
   drawWarningLamps(ctx, plane, midX, baseY + u * 0.16, u);
 }
 
 function gaugeFace(ctx, x, y, r, label) {
-  // The bezel first: a machined ring, darker outside, catching a rim of
-  // light at its top-left, with four screw heads round its face.
   const bezel = ctx.createRadialGradient(x - r * 0.4, y - r * 0.45, r * 0.3, x, y, r * 1.09);
   bezel.addColorStop(0, '#5d6f82');
   bezel.addColorStop(0.55, '#2c3947');
@@ -44,7 +54,6 @@ function gaugeFace(ctx, x, y, r, label) {
     ctx.arc(x + Math.sin(a) * r * 1.03, y - Math.cos(a) * r * 1.03, Math.max(1.3, r * 0.045), 0, Math.PI * 2);
     ctx.fill();
   }
-  // Glass: one soft reflection, high and left, over everything inside.
   ctx.fillStyle = 'rgba(190,225,255,0.10)';
   ctx.beginPath(); ctx.ellipse(x - r * 0.3, y - r * 0.44, r * 0.44, r * 0.2, -0.6, 0, Math.PI * 2); ctx.fill();
   if (label) {
@@ -56,8 +65,6 @@ function gaugeFace(ctx, x, y, r, label) {
 }
 
 function needle(ctx, x, y, angle, len, colour = '#f3f6f8') {
-  // The needle's own shadow first, dropped down-right onto the dial,
-  // then the needle itself with a proper tail and a brass hub.
   ctx.strokeStyle = 'rgba(0,0,0,0.55)';
   ctx.lineWidth = 3;
   ctx.beginPath();
@@ -76,8 +83,6 @@ function needle(ctx, x, y, angle, len, colour = '#f3f6f8') {
   ctx.beginPath(); ctx.arc(x, y, 1.4, 0, Math.PI * 2); ctx.fill();
 }
 
-// The ball-and-horizon: sky above, earth below, the aeroplane symbol fixed
-// in the middle while the world rolls and pitches behind it.
 export function drawAttitudeIndicator(ctx, plane, x, y, r) {
   ctx.save();
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
@@ -117,11 +122,9 @@ export function drawAttitudeIndicator(ctx, plane, x, y, r) {
   label(ctx, x, y, r, 'ATTITUDE');
 }
 
-export function drawAltimeter(ctx, plane, x, y, r) {
+export function drawAltimeter(ctx, plane, x, y, r, dt = 0.016) {
   gaugeFace(ctx, x, y, r, null);
-  const feet = Math.max(0, plane.y * 3.281);
-  // Tick ring at the rim, numerals in their own clear band inside it —
-  // v1 printed the numerals where the drum window landed, and the two
+  const feet = Math.max(0, springNeedle(needleSpringStates.altFeet, Math.max(0, plane.y * 3.281), dt));
   ctx.strokeStyle = '#cfe0ec';
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
@@ -137,8 +140,6 @@ export function drawAltimeter(ctx, plane, x, y, r) {
   }
   needle(ctx, x, y, ((feet / 1000) % 1) * Math.PI * 2, r * 0.6);
   needle(ctx, x, y, ((feet / 10000) % 1) * Math.PI * 2, r * 0.42, PALETTE.lampAmber);
-  // The drum window sits in the one empty band of the dial — below the
-  // hub, above the bottom numeral — framed, with FEET in microprint
   ctx.fillStyle = '#05080b';
   ctx.fillRect(x - r * 0.3, y + r * 0.16, r * 0.6, r * 0.22);
   ctx.strokeStyle = '#48586a';
@@ -155,11 +156,9 @@ export function drawAltimeter(ctx, plane, x, y, r) {
   ctx.fillText('ALT ×100', x, y - r * 0.44);
 }
 
-export function drawAirspeedDial(ctx, plane, x, y, r) {
+export function drawAirspeedDial(ctx, plane, x, y, r, dt = 0.016) {
   gaugeFace(ctx, x, y, r, 'AIRSPEED KT');
-  const knots = plane.speed * 1.944;
-  // Stall arc in red, cruise in green, hard against the rim: the dial
-  // itself teaches discipline, and the arcs never touch the numerals.
+  const knots = springNeedle(needleSpringStates.speedKt, plane.speed * 1.944, dt);
   arc(ctx, x, y, r * 0.93, speedAngle(0), speedAngle(46), PALETTE.lampRed);
   arc(ctx, x, y, r * 0.93, speedAngle(46), speedAngle(120), PALETTE.lampGreen);
   arc(ctx, x, y, r * 0.93, speedAngle(120), speedAngle(170), '#e8eef4');
@@ -194,8 +193,6 @@ function arc(ctx, x, y, r, a0, a1, colour) {
   ctx.stroke();
 }
 
-// A moving ribbon under a fixed lubber line: N, the numbered tens, and the
-// exact heading in a window — the heading the HUD also prints in digits.
 export function drawCompassRibbon(ctx, plane, cx, y, w) {
   const deg = headingDegrees(plane);
   ctx.fillStyle = 'rgba(8,12,17,0.82)';
@@ -246,8 +243,6 @@ function bar(ctx, x, y, w, h, frac, colour, name) {
   ctx.strokeStyle = 'rgba(120,160,190,0.4)';
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, w, h);
-  // The fill is a lit gradient with a bright leading edge, and the
-  // trough carries quarter ticks so the level reads at a glance.
   const fw = Math.max(0, (w - 3) * Math.min(1, frac));
   if (fw > 2) {
     const grad = ctx.createLinearGradient(x, y, x, y + h);

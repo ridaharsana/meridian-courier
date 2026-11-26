@@ -1,5 +1,4 @@
-// game-state.js — the day's shape: title → briefing → flying → verdict,
-// mission to mission. One job: own the phase machine and the (re)starting
+// game-state.js — the phase machine and (re)starting of sorties.
 
 import { createAircraft } from './flight-model.js';
 import { MISSIONS, createMissionState } from './missions.js';
@@ -24,8 +23,6 @@ export function startSortie(game, index) {
   const mission = MISSIONS[index];
   game.missionIndex = index;
   game.missionState = createMissionState(mission);
-  // Fresh ring objects each sortie: a gate flown yesterday stays flown
-  // only in the logbook, never on the course.
   game.missionState.mission = {
     ...mission,
     rings: mission.rings.map((r) => ({ ...r, passed: false })),

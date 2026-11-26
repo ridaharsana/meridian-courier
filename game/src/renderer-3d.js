@@ -270,7 +270,21 @@ export function samplePoint(wx, wz) {
 }
 
 export function createCamera() {
-  return { x: 0, y: 60, z: 0, heading: 0, pitch: 0, roll: 0, fov: 1.05 };
+  return { x: 0, y: 60, z: 0, heading: 0, pitch: 0, roll: 0, fov: 1.05, vx: 0, vy: 0, vz: 0 };
+}
+
+// Spring-damper chase settle (Motion-style spring, stiffness 90,
+// damping 14): the camera trails with weight and catches up with a
+// soft overshoot instead of the old rigid exponential lerp.
+export function springChaseCamera(camera, tx, ty, tz, dt) {
+  const STIFF = 90;
+  const DAMP = 14;
+  camera.vx += ((tx - camera.x) * STIFF - camera.vx * DAMP) * dt;
+  camera.vy += ((ty - camera.y) * STIFF - camera.vy * DAMP) * dt;
+  camera.vz += ((tz - camera.z) * STIFF - camera.vz * DAMP) * dt;
+  camera.x += camera.vx * dt;
+  camera.y += camera.vy * dt;
+  camera.z += camera.vz * dt;
 }
 
 // Chase camera: settles behind and above the tail, leaning into the bank so
@@ -285,10 +299,15 @@ export function chaseCamera(camera, plane, dt, snap = false, view = null) {
   const tx = plane.x - fx * back + Math.cos(plane.heading) * side;
   const tz = plane.z - fz * back + Math.sin(plane.heading) * side;
   const ty = plane.y + (view ? view.up : 2.6);
-  const k = snap ? 1 : Math.min(1, dt * 7);
-  camera.x += (tx - camera.x) * k;
-  camera.y += (ty - camera.y) * k;
-  camera.z += (tz - camera.z) * k;
+  if (snap || view) {
+    const k = snap ? 1 : Math.min(1, dt * 7);
+    camera.x += (tx - camera.x) * k;
+    camera.y += (ty - camera.y) * k;
+    camera.z += (tz - camera.z) * k;
+    camera.vx = 0; camera.vy = 0; camera.vz = 0;
+  } else {
+    springChaseCamera(camera, tx, ty, tz, dt);
+  }
   if (view) {
     const ax = plane.x + fx * view.aim + Math.cos(plane.heading) * (view.aimSide || 0) - camera.x;
     const az = plane.z + fz * view.aim + Math.sin(plane.heading) * (view.aimSide || 0) - camera.z;
@@ -1179,6 +1198,22 @@ export function drawRing(ctx, project, ring, isNext, pulse) {
     pts.push(project(wx, ring.y + ly, wz));
   }
   if (pts.some((p) => !p)) return;
+  // The next gate breathes: an echo hoop expands off it with ease-out
+  // scale and an ease-in fade, so the target reads alive in a still.
+  if (isNext) {
+    const grow = 1 + pulse * 0.22;
+    ctx.strokeStyle = `rgba(61,255,122,${(0.4 * (1 - pulse)).toFixed(3)})`;
+    ctx.lineWidth = Math.max(2, pts[0].scale * 3);
+    ctx.beginPath();
+    const cx = (pts[0].x + pts[13].x) / 2;
+    const cy = (pts[0].y + pts[13].y) / 2;
+    pts.forEach((p, i) => {
+      const ex = cx + (p.x - cx) * grow;
+      const ey = cy + (p.y - cy) * grow;
+      return i ? ctx.lineTo(ex, ey) : ctx.moveTo(ex, ey);
+    });
+    ctx.stroke();
+  }
   // A soft halo pass under the hoop, then the hoop itself with a pale
   // core line — the next gate glows green and reads from a mile out.
   ctx.strokeStyle = isNext ? 'rgba(61,255,122,0.25)' : 'rgba(255,182,46,0.18)';

@@ -1,423 +1,205 @@
-// aircraft-art.js — the Petrel: chase aeroplane and cockpit frame.
+// aircraft-art.js — the Petrel as a real 3D aeroplane: a lathe-turned
+// fuselage, slab wings with dihedral, a glass canopy and a spinning
+// prop, built once as a three.js group and posed every frame from the
+// flight model. The cockpit frame for the pilot's-eye view stays a 2D
+// overlay drawing, kept in this file because it is aircraft too.
 
+import * as THREE from 'three';
 import { PALETTE } from './config.js';
-import { groundHeight } from './terrain-archipelago.js';
 import { headingDegrees } from './flight-model.js';
-import { SUN_DIR, hexRgb } from './renderer-3d.js';
 
-const SUN_LEN = Math.hypot(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z);
-const SUN = { x: SUN_DIR.x / SUN_LEN, y: SUN_DIR.y / SUN_LEN, z: SUN_DIR.z / SUN_LEN };
+const APRICOT = 0xeab96f;
+const APRICOT_DEEP = 0xd99a4e;
+const UMBER = 0xa83c1e;
+const TAIL_RED = 0xc4502e;
+const CREAM = 0xf6ead2;
 
-export function drawAircraftShadow(ctx, project, plane) {
-  const g = groundHeight(plane.x, plane.z);
-  const alt = plane.y - g;
-  if (alt > 700) return;
-  const len = Math.min(alt * 1.35, 120);
-  const sx = plane.x - 0.866 * len;
-  const sz = plane.z + 0.499 * len;
-  const p = project(sx, g + 0.6, sz);
-  if (!p || p.depth < 8) return;
-  const ahead = project(
-    sx + Math.sin(plane.heading) * 10, g + 0.6,
-    sz - Math.cos(plane.heading) * 10);
-  const ang = ahead ? Math.atan2(ahead.y - p.y, ahead.x - p.x) : 0;
-  const fade = Math.max(0.05, 0.4 - alt / 2200);
-  const rx = Math.min(p.scale * 10.5, 175);
-  const ry = Math.min(p.scale * 3.6, 62);
-  ctx.fillStyle = `rgba(10,26,34,${fade * 0.5})`;
-  ctx.beginPath();
-  ctx.ellipse(p.x, p.y, rx, ry, ang, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = `rgba(10,26,34,${fade})`;
-  ctx.beginPath();
-  ctx.ellipse(p.x, p.y, rx * 0.7, ry * 0.64, ang, 0, Math.PI * 2);
-  ctx.ellipse(p.x, p.y, rx * 0.2, ry * 1.28, ang, 0, Math.PI * 2);
-  ctx.fill();
+function petrelFinTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#c4502e';
+  g.fillRect(0, 0, 256, 128);
+  g.fillStyle = '#fdf6e0';
+  g.font = '800 44px Georgia, serif';
+  g.textAlign = 'center';
+  g.fillText('PETREL', 128, 78);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
 }
 
-// Local axes: x to starboard, y up, z toward the nose.
-const FUSELAGE_RINGS = [
-  [3.95, 0.11, 0.11, 0.05],
-  [3.45, 0.65, 0.63, 0.02],
-  [2.45, 0.78, 0.78, 0.05],
-  [1.55, 0.87, 0.88, 0.08],
-  [0.15, 0.91, 0.86, 0.06],
-  [-1.60, 0.67, 0.65, 0.10],
-  [-3.20, 0.43, 0.45, 0.16],
-  [-4.55, 0.18, 0.24, 0.22],
-];
+// buildPetrelAircraft returns the group plus the parts the frame loop
+// animates: the prop assembly, the blur disc and the gear group.
+export function buildPetrelAircraft() {
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  group.add(body);
 
-const CANOPY_SECTIONS = [
-  [2.30, 0.50, 0.52, 1.16],
-  [1.20, 0.58, 0.55, 1.30],
-  [0.35, 0.55, 0.55, 1.24],
-];
+  const apricot = new THREE.MeshStandardMaterial({ color: APRICOT, roughness: 0.46, metalness: 0.08 });
+  const apricotDeep = new THREE.MeshStandardMaterial({ color: APRICOT_DEEP, roughness: 0.52, metalness: 0.08 });
+  const umber = new THREE.MeshStandardMaterial({ color: UMBER, roughness: 0.5, metalness: 0.05 });
+  const cream = new THREE.MeshStandardMaterial({ color: CREAM, roughness: 0.55, metalness: 0.05 });
 
-function ringPoint(ring, k) {
-  const a = (k * Math.PI) / 4;
-  return [ring[1] * Math.sin(a), ring[3] + ring[2] * Math.cos(a), ring[0]];
-}
+  // Fuselage: a lathe profile, tail tip first, swelling through the
+  // cabin and tapering into the nose. rotateX turns the lathe axis
+  // onto -Z, so the nose points the three.js way.
+  const profile = [
+    [0.04, 0.0], [0.3, 0.7], [0.52, 2.0], [0.74, 3.6], [0.84, 4.9],
+    [0.82, 6.0], [0.62, 7.1], [0.34, 7.9], [0.1, 8.25], [0.02, 8.4],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const fuselageGeo = new THREE.LatheGeometry(profile, 22);
+  fuselageGeo.rotateX(-Math.PI / 2);
+  fuselageGeo.translate(0, 0, 4.2);
+  const fuselage = new THREE.Mesh(fuselageGeo, apricot);
+  fuselage.castShadow = true;
+  body.add(fuselage);
 
-export function drawChaseAircraft(ctx, plane, width, height, t, project, camera) {
-  const F = { x: Math.sin(plane.heading), y: 0, z: -Math.cos(plane.heading) };
-  const R = { x: Math.cos(plane.heading), y: 0, z: Math.sin(plane.heading) };
-  const U = { x: 0, y: 1, z: 0 };
-  const cp = Math.cos(plane.pitch);
-  const sp = Math.sin(plane.pitch);
-  const F1 = {
-    x: F.x * cp + U.x * sp, y: F.y * cp + U.y * sp, z: F.z * cp + U.z * sp,
-  };
-  const U1 = {
-    x: U.x * cp - F.x * sp, y: U.y * cp - F.y * sp, z: U.z * cp - F.z * sp,
-  };
-  const cr = Math.cos(plane.roll);
-  const sr = Math.sin(plane.roll);
-  const R1 = {
-    x: R.x * cr - U1.x * sr, y: R.y * cr - U1.y * sr, z: R.z * cr - U1.z * sr,
-  };
-  const U2 = {
-    x: U1.x * cr + R.x * sr, y: U1.y * cr + R.y * sr, z: U1.z * cr + R.z * sr,
-  };
-  const toWorld = ([lx, ly, lz]) => ({
-    x: plane.x + R1.x * lx + U2.x * ly + F1.x * lz,
-    y: plane.y + R1.y * lx + U2.y * ly + F1.y * lz,
-    z: plane.z + R1.z * lx + U2.z * ly + F1.z * lz,
+  // The umber cheatline: a slim band carried down both flanks.
+  for (const sideSign of [-1, 1]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 5.6), umber);
+    band.position.set(0.8 * sideSign, 0.08, -0.5);
+    body.add(band);
+  }
+
+  // Canopy: a scaled sphere segment in near-black glass — low
+  // roughness and high metalness so the sky and sun live in it.
+  const glass = new THREE.MeshStandardMaterial({
+    color: 0x1c3448, roughness: 0.08, metalness: 0.9, envMapIntensity: 1.6,
   });
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.78, 20, 14), glass);
+  canopy.scale.set(0.82, 0.62, 1.5);
+  canopy.position.set(0, 0.55, -1.2);
+  body.add(canopy);
 
-  const faces = [];   // opaque: {pts, base:[r,g,b]}
-  const glass = [];   // translucent, painted last: {pts, style}
-  const addFace = (pts, hex) => faces.push({ pts, base: hexRgb(hex) });
-
-  for (let sgm = 0; sgm < FUSELAGE_RINGS.length - 1; sgm++) {
-    const ringA = FUSELAGE_RINGS[sgm];
-    const ringB = FUSELAGE_RINGS[sgm + 1];
-    const base = sgm < 2 ? '#d84e2c' : '#eab96f';
-    for (let k = 0; k < 8; k++) {
-      const k2 = (k + 1) % 8;
-      addFace([
-        ringPoint(ringA, k), ringPoint(ringA, k2),
-        ringPoint(ringB, k2), ringPoint(ringB, k),
-      ], base);
-    }
+  // Wings: two slabs with a breath of dihedral, cream tips, and a
+  // darker flap panel along the trailing edge.
+  for (const sideSign of [-1, 1]) {
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.13, 1.3), apricot);
+    wing.position.set(2.15 * sideSign, -0.02, -0.55);
+    wing.rotation.z = 0.07 * sideSign;
+    wing.castShadow = true;
+    body.add(wing);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.14, 1.3), cream);
+    tip.position.set(3.95 * sideSign, 0.11, -0.55);
+    tip.rotation.z = 0.07 * sideSign;
+    body.add(tip);
+    const flap = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.07, 0.34), umber);
+    flap.position.set(1.7 * sideSign, 0.03, 0.22);
+    flap.rotation.z = 0.07 * sideSign;
+    body.add(flap);
+    // Navigation lamps: red to port, green to starboard.
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 8, 8),
+      new THREE.MeshStandardMaterial({
+        color: sideSign < 0 ? 0xff2a20 : 0x2aff66,
+        emissive: sideSign < 0 ? 0xff2a20 : 0x2aff66, emissiveIntensity: 2.4,
+      }),
+    );
+    lamp.position.set(4.2 * sideSign, 0.14, -0.55);
+    body.add(lamp);
   }
-  addFace(FUSELAGE_RINGS[0].map((_, k) => ringPoint(FUSELAGE_RINGS[0], k)), '#b23a22');
-  addFace(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1].map((_, k) => ringPoint(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1], k)), '#e0af62');
 
-  const bandPoint = (ring, side, angDeg) => {
-    const a = (angDeg * Math.PI) / 180;
-    return [
-      side * (ring[1] * Math.sin(a) + 0.02),
-      ring[3] + ring[2] * Math.cos(a),
-      ring[0],
-    ];
+  // Tailplane and the fin, which carries the PETREL name.
+  const tailplane = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 0.85), apricotDeep);
+  tailplane.position.set(0, 0.28, 3.75);
+  body.add(tailplane);
+  const fin = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 1.15, 1.0),
+    new THREE.MeshStandardMaterial({ map: petrelFinTexture(), roughness: 0.5, metalness: 0.05 }),
+  );
+  fin.position.set(0, 0.85, 3.8);
+  body.add(fin);
+  const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.4), new THREE.MeshStandardMaterial({ color: TAIL_RED, roughness: 0.5 }));
+  rudder.position.set(0, 0.72, 4.35);
+  body.add(rudder);
+
+  // Prop assembly at the nose: spinner cone, two blades, and the
+  // translucent blur disc that fades in as the throttle rises.
+  const prop = new THREE.Group();
+  prop.position.set(0, 0, -4.35);
+  const spinner = new THREE.Mesh(
+    new THREE.ConeGeometry(0.3, 0.7, 14),
+    new THREE.MeshStandardMaterial({ color: TAIL_RED, roughness: 0.35, metalness: 0.2 }),
+  );
+  spinner.geometry.rotateX(-Math.PI / 2);
+  spinner.position.z = -0.2;
+  prop.add(spinner);
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0x2b2320, roughness: 0.6 });
+  for (const a of [0, Math.PI / 2]) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.7, 0.05), bladeMat);
+    blade.rotation.z = a;
+    prop.add(blade);
+  }
+  const blurDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(1.42, 26),
+    new THREE.MeshBasicMaterial({ color: 0xf3e9d2, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  blurDisc.position.z = 0.05;
+  prop.add(blurDisc);
+  body.add(prop);
+
+  // Dressing details: a wire aerial from the canopy to the fin, a
+  // short mast, and exhaust stubs along the cowling flanks.
+  const wireMat = new THREE.MeshBasicMaterial({ color: 0x2a2d31 });
+  const wireGeo = new THREE.CylinderGeometry(0.016, 0.016, 4.9, 4);
+  const wire = new THREE.Mesh(wireGeo, wireMat);
+  wire.position.set(0, 1.62, 1.35);
+  wire.rotation.x = Math.PI / 2 - Math.atan2(0.95, 4.9);
+  body.add(wire);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.55, 6),
+    new THREE.MeshStandardMaterial({ color: 0x8f97a3, roughness: 0.4, metalness: 0.6 }));
+  mast.position.set(0, 1.18, -0.9);
+  body.add(mast);
+  for (const sideSign of [-1, 1]) {
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.5, 8),
+      new THREE.MeshStandardMaterial({ color: 0x4a3a30, roughness: 0.55, metalness: 0.5 }));
+    stub.geometry = stub.geometry.clone();
+    stub.rotation.z = sideSign * Math.PI / 2.4;
+    stub.position.set(0.62 * sideSign, -0.42, -3.3);
+    body.add(stub);
+  }
+
+  // Landing gear: three legs with wheels, folded away by flag.
+  const gear = new THREE.Group();
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x8f97a3, roughness: 0.35, metalness: 0.7 });
+  const tyreMat = new THREE.MeshStandardMaterial({ color: 0x17181c, roughness: 0.9 });
+  const addWheel = (x, y, z) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, Math.abs(y) + 0.3, 8), legMat);
+    leg.position.set(x, y / 2 - 0.1, z);
+    gear.add(leg);
+    const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.2, 14);
+    wheelGeo.rotateZ(Math.PI / 2);
+    const wheel = new THREE.Mesh(wheelGeo, tyreMat);
+    wheel.position.set(x, y, z);
+    gear.add(wheel);
   };
-  for (let sgm = 1; sgm < FUSELAGE_RINGS.length - 1; sgm++) {
-    const ringA = FUSELAGE_RINGS[sgm];
-    const ringB = FUSELAGE_RINGS[sgm + 1];
-    for (const side of [-1, 1]) {
-      addFace([
-        bandPoint(ringA, side, 55), bandPoint(ringA, side, 108),
-        bandPoint(ringB, side, 108), bandPoint(ringB, side, 55),
-      ], '#a83c1e');
-    }
-  }
+  addWheel(0, -1.05, -3.1);
+  addWheel(-0.85, -1.1, 0.5);
+  addWheel(0.85, -1.1, 0.5);
+  body.add(gear);
 
-  const canopyPt = (sec, i) => {
-    const [z, w, baseY, topY] = sec;
-    const shape = [
-      [-w, baseY], [-w * 0.8, topY - 0.13], [0, topY], [w * 0.8, topY - 0.13], [w, baseY],
-    ];
-    return [shape[i][0], shape[i][1], z];
-  };
-  for (let sgm = 0; sgm < CANOPY_SECTIONS.length - 1; sgm++) {
-    for (let i = 0; i < 4; i++) {
-      addFace([
-        canopyPt(CANOPY_SECTIONS[sgm], i), canopyPt(CANOPY_SECTIONS[sgm], i + 1),
-        canopyPt(CANOPY_SECTIONS[sgm + 1], i + 1), canopyPt(CANOPY_SECTIONS[sgm + 1], i),
-      ], '#1e3a4f');
-    }
-  }
-  addFace(CANOPY_SECTIONS[0].map((_, i) => canopyPt(CANOPY_SECTIONS[0], i)), '#16293a');
-  addFace(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1].map((_, i) => canopyPt(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1], i)), '#12222f');
-
-  const slab = (sections, base, flapBase) => {
-    for (let sgm = 0; sgm < sections.length - 1; sgm++) {
-      const A = sections[sgm];
-      const B = sections[sgm + 1];
-      addFace([ // top
-        [A[0], A[1] + A[4], A[2]], [B[0], B[1] + B[4], B[2]],
-        [B[0], B[1] + B[4], B[3]], [A[0], A[1] + A[4], A[3]],
-      ], base);
-      if (flapBase) {
-        const fA = A[2] + (A[3] - A[2]) * 0.62;
-        const fB = B[2] + (B[3] - B[2]) * 0.62;
-        addFace([
-          [A[0], A[1] + A[4] + 0.004, fA], [B[0], B[1] + B[4] + 0.004, fB],
-          [B[0], B[1] + B[4] + 0.004, B[3]], [A[0], A[1] + A[4] + 0.004, A[3]],
-        ], flapBase);
-      }
-      addFace([ // bottom
-        [A[0], A[1] - A[4], A[2]], [B[0], B[1] - B[4], B[2]],
-        [B[0], B[1] - B[4], B[3]], [A[0], A[1] - A[4], A[3]],
-      ], base);
-      addFace([ // leading edge
-        [A[0], A[1] + A[4], A[2]], [B[0], B[1] + B[4], B[2]],
-        [B[0], B[1] - B[4], B[2]], [A[0], A[1] - A[4], A[2]],
-      ], base);
-      addFace([ // trailing edge
-        [A[0], A[1] + A[4], A[3]], [B[0], B[1] + B[4], B[3]],
-        [B[0], B[1] - B[4], B[3]], [A[0], A[1] - A[4], A[3]],
-      ], base);
-    }
-    const tip = sections[sections.length - 1];
-    addFace([
-      [tip[0], tip[1] + tip[4], tip[2]], [tip[0], tip[1] + tip[4], tip[3]],
-      [tip[0], tip[1] - tip[4], tip[3]], [tip[0], tip[1] - tip[4], tip[2]],
-    ], '#f3ddae');
-  };
-  for (const side of [-1, 1]) {
-    slab([
-      [side * 0.0, 0.80, 1.78, -0.18, 0.095],
-      [side * 2.8, 0.97, 1.72, -0.22, 0.085],
-      [side * 5.6, 1.14, 1.62, -0.30, 0.075],
-    ], '#e05736', '#c24327');
-    slab([
-      [side * 0.0, 0.30, -3.55, -4.5, 0.06],
-      [side * 1.95, 0.34, -3.62, -4.44, 0.05],
-    ], '#e05736', '#c24327');
-  }
-
-  const FIN = [
-    [-4.75, 0.28], [-3.35, 0.40], [-3.60, 1.52], [-4.05, 1.58], [-4.55, 0.95],
-  ];
-  for (const sx of [-0.055, 0.055]) {
-    addFace(FIN.map(([z, y]) => [sx, y, z]), '#d8502f');
-  }
-  for (let i = 0; i < FIN.length; i++) {
-    const j = (i + 1) % FIN.length;
-    addFace([
-      [-0.055, FIN[i][1], FIN[i][0]], [0.055, FIN[i][1], FIN[i][0]],
-      [0.055, FIN[j][1], FIN[j][0]], [-0.055, FIN[j][1], FIN[j][0]],
-    ], '#c24327');
-  }
-  const FIN_TIP = [
-    [-3.60, 1.52], [-4.05, 1.58], [-4.18, 1.27], [-3.72, 1.23],
-  ];
-  for (const sx of [-0.058, 0.058]) {
-    addFace(FIN_TIP.map(([z, y]) => [sx, y, z]), '#f3ddae');
-  }
-
-  if (plane.gearDown) {
-    for (const side of [-1, 1]) {
-      addFace([
-        [side * 0.70, -0.58, 0.44], [side * 0.70, -0.58, 0.66],
-        [side * 1.02, -1.52, 0.66], [side * 1.02, -1.52, 0.44],
-      ], '#8f96a0');
-      const wheelC = [side * 1.06, -1.70, 0.55];
-      const oct = (cx, r, y, z) => {
-        const pts = [];
-        for (let k = 0; k < 8; k++) {
-          const a = (k * Math.PI) / 4;
-          pts.push([cx, y + r * Math.cos(a), z + r * Math.sin(a)]);
-        }
-        return pts;
-      };
-      const outer = oct(wheelC[0] + side * 0.09, 0.34, wheelC[1], wheelC[2]);
-      const inner = oct(wheelC[0] - side * 0.09, 0.34, wheelC[1], wheelC[2]);
-      addFace(outer, '#17191c');
-      addFace(inner, '#17191c');
-      for (let k = 0; k < 8; k++) {
-        const k2 = (k + 1) % 8;
-        addFace([outer[k], outer[k2], inner[k2], inner[k]], '#23262a');
-      }
-      addFace(oct(wheelC[0] + side * 0.1, 0.15, wheelC[1], wheelC[2]), '#6a7480');
-    }
-  }
-
-  if (plane.throttle > 0.03 || plane.speed > 4) {
-    const discPts = [];
-    for (let k = 0; k < 16; k++) {
-      const a = (k * Math.PI) / 8;
-      const w = toWorld([Math.sin(a) * 1.18, 0.05 + Math.cos(a) * 1.18, 4.02]);
-      discPts.push(project(w.x, w.y, w.z));
-    }
-    if (!discPts.some((p) => !p)) {
-      ctx.fillStyle = 'rgba(228,236,240,0.13)';
-      ctx.beginPath();
-      discPts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,220,170,0.3)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    const spin = plane.propSpin || t * 30;
-    ctx.fillStyle = 'rgba(35,38,42,0.5)';
-    for (const off of [0, Math.PI]) {
-      const a = spin + off;
-      const dir = [Math.sin(a), Math.cos(a)];
-      const perp = [Math.cos(a), -Math.sin(a)];
-      const blade = [
-        [dir[0] * 0.22 + perp[0] * 0.1, 0.05 + dir[1] * 0.22 + perp[1] * 0.1, 4.02],
-        [dir[0] * 0.22 - perp[0] * 0.1, 0.05 + dir[1] * 0.22 - perp[1] * 0.1, 4.02],
-        [dir[0] * 1.12 - perp[0] * 0.045, 0.05 + dir[1] * 1.12 - perp[1] * 0.045, 4.02],
-        [dir[0] * 1.12 + perp[0] * 0.045, 0.05 + dir[1] * 1.12 + perp[1] * 0.045, 4.02],
-      ].map((lp) => { const w = toWorld(lp); return project(w.x, w.y, w.z); });
-      if (blade.some((p) => !p)) continue;
-      ctx.beginPath();
-      blade.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
-
-  const painted = [];
-  for (const face of faces) {
-    const world = face.pts.map(toWorld);
-    const proj = world.map((p) => project(p.x, p.y, p.z));
-    if (proj.some((p) => !p)) continue;
-    const [a, b, c] = world;
-    const ux = b.x - a.x;
-    const uy = b.y - a.y;
-    const uz = b.z - a.z;
-    const vx = c.x - a.x;
-    const vy = c.y - a.y;
-    const vz = c.z - a.z;
-    let nx = uy * vz - uz * vy;
-    let ny = uz * vx - ux * vz;
-    let nz = ux * vy - uy * vx;
-    const nl = Math.hypot(nx, ny, nz) || 1;
-    nx /= nl; ny /= nl; nz /= nl;
-    const dot = Math.max(0, nx * SUN.x + ny * SUN.y + nz * SUN.z);
-    const light = 0.55 + 0.6 * dot;
-    const depth = proj.reduce((sum, p) => sum + p.depth, 0) / proj.length;
-    painted.push({
-      proj,
-      depth,
-      fill: `rgb(${Math.min(255, Math.round(face.base[0] * light))},${Math.min(255, Math.round(face.base[1] * light))},${Math.min(255, Math.round(face.base[2] * light))})`,
-    });
-  }
-  painted.sort((a, b) => b.depth - a.depth);
-  for (const face of painted) {
-    ctx.fillStyle = face.fill;
-    ctx.beginPath();
-    face.proj.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = 'rgba(90,70,45,0.45)';
-  ctx.lineWidth = 1.2;
-  for (const ringIdx of [3, 4, 6]) {
-    const ring = FUSELAGE_RINGS[ringIdx];
-    for (let k = 0; k < 8; k++) {
-      const k2 = (k + 1) % 8;
-      const lA = ringPoint(ring, k);
-      const lB = ringPoint(ring, k2);
-      const wA = toWorld(lA);
-      const wB = toWorld(lB);
-      const mid = {
-        x: (wA.x + wB.x) / 2, y: (wA.y + wB.y) / 2, z: (wA.z + wB.z) / 2,
-      };
-      const outLocal = [(lA[0] + lB[0]) / 2, (lA[1] + lB[1]) / 2 - ring[3], 0];
-      const out = {
-        x: R1.x * outLocal[0] + U2.x * outLocal[1],
-        y: R1.y * outLocal[0] + U2.y * outLocal[1],
-        z: R1.z * outLocal[0] + U2.z * outLocal[1],
-      };
-      const view = { x: camera.x - mid.x, y: camera.y - mid.y, z: camera.z - mid.z };
-      if (out.x * view.x + out.y * view.y + out.z * view.z <= 0.05) continue;
-      const pA = project(wA.x, wA.y, wA.z);
-      const pB = project(wB.x, wB.y, wB.z);
-      if (!pA || !pB) continue;
-      ctx.beginPath();
-      ctx.moveTo(pA.x, pA.y);
-      ctx.lineTo(pB.x, pB.y);
-      ctx.stroke();
-    }
-  }
-  {
-    const anchorW = toWorld([0, 0.18, -3.55]);
-    const anchor = project(anchorW.x, anchorW.y, anchorW.z);
-    const rightW = toWorld([1, 0.18, -3.55]);
-    const right = project(rightW.x, rightW.y, rightW.z);
-    if (anchor && right) {
-      const ang = Math.atan2(right.y - anchor.y, right.x - anchor.x);
-      ctx.save();
-      ctx.translate(anchor.x, anchor.y);
-      ctx.rotate(ang);
-      ctx.fillStyle = '#6e4520';
-      ctx.font = `700 ${Math.max(7, Math.min(13, anchor.scale * 0.34))}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('PETREL', 0, 3);
-      ctx.restore();
-    }
-  }
-
-  for (const side of [-1, 1]) {
-    const tipW = toWorld([side * 5.6, 1.14, 0.65]);
-    const tp = project(tipW.x, tipW.y, tipW.z);
-    if (!tp) continue;
-    ctx.fillStyle = side < 0 ? 'rgba(255,81,71,0.3)' : 'rgba(81,255,138,0.3)';
-    ctx.beginPath(); ctx.arc(tp.x, tp.y, Math.max(3, tp.scale * 0.55), 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = side < 0 ? PALETTE.lampRed : PALETTE.lampGreen;
-    ctx.beginPath(); ctx.arc(tp.x, tp.y, Math.max(1.6, tp.scale * 0.28), 0, Math.PI * 2); ctx.fill();
-  }
-
-  const noseView = F1.x * (camera.x - plane.x) + F1.y * (camera.y - plane.y) + F1.z * (camera.z - plane.z);
-  const spinnerBase = [];
-  for (let k = 0; k < 8; k++) {
-    const a = (k * Math.PI) / 4;
-    spinnerBase.push([Math.sin(a) * 0.21, 0.05 + Math.cos(a) * 0.21, 3.98]);
-  }
-  const apexW = toWorld([0, 0.05, 4.45]);
-  const apexP = project(apexW.x, apexW.y, apexW.z);
-  if (apexP && noseView > 0) {
-    for (let k = 0; k < 8; k++) {
-      const k2 = (k + 1) % 8;
-      const wA = toWorld(spinnerBase[k]);
-      const wB = toWorld(spinnerBase[k2]);
-      const pA = project(wA.x, wA.y, wA.z);
-      const pB = project(wB.x, wB.y, wB.z);
-      if (!pA || !pB) continue;
-      ctx.fillStyle = k % 2 ? '#c24327' : '#d8502f';
-      ctx.beginPath();
-      ctx.moveTo(pA.x, pA.y);
-      ctx.lineTo(pB.x, pB.y);
-      ctx.lineTo(apexP.x, apexP.y);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
-  for (const [secA, secB, alpha] of [[2, 1, 0.5], [1, 0, 0.36]]) {
-    const streak = [
-      canopyLocal(secA, 2), canopyLocal(secA, 3), canopyLocal(secB, 3), canopyLocal(secB, 2),
-    ].map((lp) => { const w = toWorld(lp); return project(w.x, w.y, w.z); });
-    if (streak.some((p) => !p)) continue;
-    ctx.fillStyle = `rgba(255,214,150,${alpha})`;
-    ctx.beginPath();
-    streak.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function canopyLocal(secIdx, ptIdx) {
-    const sec = CANOPY_SECTIONS[secIdx];
-    const [z, w, baseY, topY] = sec;
-    const shape = [
-      [-w, baseY], [-w * 0.8, topY - 0.13], [0, topY], [w * 0.8, topY - 0.13], [w, baseY],
-    ];
-    return [shape[ptIdx][0], shape[ptIdx][1], z];
-  }
+  group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return { group, prop, blurDisc, gear };
 }
 
-function poly(ctx, pts) {
-  ctx.beginPath();
-  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-  ctx.closePath();
-  ctx.fill();
+// Pose the group from the flight model: the model space nose is -Z,
+// so yaw is the negated compass heading and the Euler order is YXZ —
+// yaw first, then pitch, then roll about the body's own axes.
+export function updatePetrelAircraft(petrel, plane) {
+  const g = petrel.group;
+  g.position.set(plane.x, plane.y, plane.z);
+  g.rotation.order = 'YXZ';
+  g.rotation.set(plane.pitch, -plane.heading, -plane.roll);
+  petrel.prop.rotation.z = plane.propSpin;
+  petrel.blurDisc.material.opacity = Math.min(0.26, plane.throttle * 0.3 + (plane.speed > 4 ? 0.08 : 0));
+  petrel.gear.visible = plane.gearDown;
+  return g;
 }
 
+// The pilot's-eye frame: coaming, posts and the compass ball, drawn
+// on the 2D overlay above the 3D windscreen view.
 export function drawCockpitFrame(ctx, width, height, plane) {
   const panelTop = height * 0.68;
   const panelGrad = ctx.createLinearGradient(0, panelTop - 34, 0, height);
@@ -448,7 +230,7 @@ export function drawCockpitFrame(ctx, width, height, plane) {
   ctx.setLineDash([]);
   for (const fx of [0.16, 0.84]) {
     const sx = width * fx;
-    const sy = panelTop + (fx === 0.16 ? 30 : 30);
+    const sy = panelTop + 30;
     ctx.fillStyle = '#5a6a7a';
     ctx.beginPath(); ctx.arc(sx, sy, 4.4, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#141a21';
@@ -488,7 +270,6 @@ export function drawCockpitFrame(ctx, width, height, plane) {
     ctx.beginPath(); ctx.arc(ccx, ccy, 15, 0, Math.PI * 2); ctx.clip();
     ctx.fillStyle = '#0d141c';
     ctx.fillRect(ccx - 15, ccy - 15, 30, 30);
-    ctx.fillStyle = '#e8eef4';
     ctx.font = '700 10px system-ui, sans-serif';
     ctx.textAlign = 'center';
     for (let i = 0; i < 4; i++) {

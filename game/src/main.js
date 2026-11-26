@@ -1,15 +1,13 @@
-// main.js — owns the canvas, the clock and the order of a frame.
+// main.js — owns the canvases, the clock and the order of a frame:
+// the three.js world renders first, then the 2D overlay draws the
+// cockpit frame, the instrument panel and the HUD on top of it.
 
 import { createInput, attachInput, readInput } from './input.js';
 import { createGame, startSortie, handleToggle, endSortie, PHASES } from './game-state.js';
 import { stepFlight } from './flight-model.js';
-import { updateMission, nextRing } from './missions.js';
-import {
-  createCamera, chaseCamera, cockpitCamera, makeProjector,
-  drawSky, drawSea, drawTerrain, drawRunways, drawTown, drawLandmarks, drawRing, drawClouds,
-  drawBridge, drawBoats, drawPier, drawHarbourRoad,
-} from './renderer-3d.js';
-import { drawChaseAircraft, drawCockpitFrame, drawAircraftShadow } from './aircraft-art.js';
+import { updateMission } from './missions.js';
+import { createCamera, chaseCamera, cockpitCamera, createWorld, syncWorld } from './renderer-3d.js';
+import { drawCockpitFrame } from './aircraft-art.js';
 import { drawInstrumentPanel } from './instruments.js';
 import {
   drawHudDigits, drawMissionBanner, drawCentreMarker, drawEventFlash,
@@ -19,9 +17,10 @@ import { createAudio, startAudio, updateAudio, playGateChime, playTouchdownBell,
 import { applyShotScene } from './shots.js';
 import {
   createParticlePool, spawnRingBurst, spawnWingtipTrail, spawnPropwashDust,
-  seedShotJuice, updateParticles, drawParticles,
+  seedShotJuice, updateParticles,
 } from './juice-particles.js';
 
+const glCanvas = document.getElementById('gl');
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const input = createInput();
@@ -30,6 +29,7 @@ const audio = createAudio();
 const camera = createCamera();
 const game = createGame();
 const juicePool = createParticlePool();
+const world = createWorld(glCanvas);
 let frameDt = 0.016;
 
 const params = new URLSearchParams(location.search);
@@ -93,7 +93,7 @@ function frame(now) {
 
   if (game.cameraMode === 'cockpit') cockpitCamera(camera, game.plane);
   else chaseCamera(camera, game.plane, shotMode ? 1 : dt, shotMode, shotMode ? game.shotCam || null : null);
-  render(t);
+  render(t, dt);
   updateAudio(audio, game.plane);
   requestAnimationFrame(frame);
 }
@@ -130,33 +130,14 @@ function collectMissionEvents(game, missionEvents, ringsBefore, t) {
   }
 }
 
-function render(t) {
+function render(t, dt) {
   const width = canvas.width;
   const height = canvas.height;
   const plane = game.plane;
-  const project = makeProjector(camera, width, height);
-  const horizon = drawSky(ctx, camera, width, height);
-  drawSea(ctx, project, camera, width, height, horizon);
-  drawClouds(ctx, project, plane, t);
-  drawTerrain(ctx, project, plane);
-  drawTown(ctx, project, plane);
-  drawRunways(ctx, project);
-  drawLandmarks(ctx, project);
-  drawBridge(ctx, project);
-  drawPier(ctx, project);
-  drawBoats(ctx, project, t);
-  drawHarbourRoad(ctx, project);
-  const upcoming = nextRing(game.missionState);
-  for (const ring of game.missionState.mission.rings) {
-    if (ring.passed) continue;
-    drawRing(ctx, project, ring, ring === upcoming, Math.sin(t * 5) * 0.5 + 0.5);
-  }
-  drawParticles(ctx, juicePool, project);
-  drawAircraftShadow(ctx, project, plane);
+  syncWorld(world, game, camera, juicePool, t, dt);
+  ctx.clearRect(0, 0, width, height);
   if (game.cameraMode === 'cockpit') {
     drawCockpitFrame(ctx, width, height, plane);
-  } else {
-    drawChaseAircraft(ctx, plane, width, height, t, project, camera);
   }
   drawInstrumentPanel(ctx, plane, width, height, game.cameraMode, frameDt);
   drawHudDigits(ctx, plane, width, height);

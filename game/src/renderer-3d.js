@@ -21,7 +21,6 @@ export function shade(hex, f) {
 
 // A cell's deterministic 0..1 hash from its grid coordinates: trees,
 // snow streaks and window lights are planted by it, so the chart is
-// the same on every flight and every screenshot.
 export function cellHash(gx, gz) {
   const s = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
   return s - Math.floor(s);
@@ -63,7 +62,6 @@ const CROP_TONES = ['cropWheat', 'cropYoung', 'cropDeep', 'cropPlough', 'cropFal
 
 // Inside Porto Lume's town rectangle the ground stays plain grass:
 // the houses carry that quarter, and plots under a street grid
-// would fight the town's own pattern.
 function inTownGround(x, z) {
   const lume = ISLANDS.find((i) => i.town);
   return lume && x > lume.x - 400 && x < lume.x + 400 && z > lume.z + 150 && z < lume.z + 580;
@@ -71,7 +69,6 @@ function inTownGround(x, z) {
 
 // Distance to the nearest island ring track: a dirt road that
 // circles each big island through its farmed band, so a pilot
-// skimming the lowlands crosses a track, not a texture edge.
 function trackDistance(x, z) {
   const home = Math.abs(Math.hypot(x - 0, z - 1700) - 760);
   const lume = Math.abs(Math.hypot(x - 2500, z - 2300) - 580);
@@ -122,29 +119,39 @@ function fieldTint(c, h, slope, x, z) {
 
 // The ramp itself: sea floor → shelf → shallows → wet sand → dry
 // sand → mottled grass → strata rock → noise-broken snow, every
-// boundary a blend band several metres wide.
 export function terrainBaseRgb(h, slope, x, z) {
+  // v9: one noise-warped height reads the whole shore band, so every
+  // contour the ramp draws near the water — shelf, shallows, wet
+  const shoreW = sstep(-7, -2.5, h) * (1 - sstep(5.5, 9.5, h));
+  const hw = h + chartNoise(x * 6.1, z * 6.1) * 0.9 * shoreW;
   if (h < 0.4) {
     // Underwater: the shelf falls away in one gradient, deep
     // blue-green under the keel to pale turquoise at the lip, then
-    // darkens into wet sand exactly where the water lets go.
-    let c = mixRgb(hexRgb(PALETTE.seaDeep), hexRgb(PALETTE.seaFloor), sstep(-11, -4, h));
-    c = mixRgb(c, hexRgb(PALETTE.seaShelf), sstep(-4.5, -1.2, h));
-    c = mixRgb(c, hexRgb(PALETTE.seaShallow), sstep(-2.4, 0.3, h));
-    return mixRgb(c, hexRgb(PALETTE.sandWet), sstep(-0.2, 0.9, h));
+    let c = mixRgb(hexRgb(PALETTE.seaDeep), hexRgb(PALETTE.seaFloor), sstep(-11, -4, hw));
+    c = mixRgb(c, hexRgb(PALETTE.seaShelf), sstep(-4.5, -1.2, hw));
+    c = mixRgb(c, hexRgb(PALETTE.seaShallow), sstep(-3.4, 0.8, hw));
+    c = mixRgb(c, hexRgb(PALETTE.sandWet), sstep(-0.5, 1.4, hw));
+    const fleck = (0.5 + 0.5 * chartNoise(x * 23, z * 23))
+      * sstep(-2.6, -0.4, hw) * (1 - sstep(0.1, 0.4, hw));
+    if (fleck > 0) c = mixRgb(c, hexRgb(PALETTE.foam), fleck * 0.22);
+    // Milk at the lip: shallow water over pale sand goes pale and
+    // milky in life, and the milk halves the colour distance each
+    const milk = sstep(-2.2, -0.5, hw) * (1 - sstep(0.15, 0.4, hw));
+    if (milk > 0) c = mixRgb(c, hexRgb('#86b8ad'), milk * 0.32);
+    return c;
   }
   // Sand: wet at the waterline, dry and pale a few metres up. Over
   // the very lip lies the foam's soft edge — a pale band whose
-  let c = mixRgb(hexRgb(PALETTE.sandWet), hexRgb(PALETTE.sandDry), sstep(0.4, 3.4, h));
+  let c = mixRgb(hexRgb(PALETTE.sandWet), hexRgb(PALETTE.sandDry), sstep(0.4, 3.4, hw));
   const foamN = 0.5 + 0.5 * chartNoise(x * 2.6, z * 2.6);
-  const foam = (1 - Math.abs(h - 0.65) / 0.95) * (0.3 + 0.55 * foamN);
+  const foam = (1 - Math.abs(hw - 0.65) / 0.95) * (0.3 + 0.55 * foamN);
   if (foam > 0) c = mixRgb(c, hexRgb(PALETTE.foam), Math.min(0.55, foam));
   // Grass: two tones married by height, then mottled toward scrub
   // by the chart noise so no meadow is one flat sheet of green.
   const g = mixRgb(hexRgb(PALETTE.grassLow), hexRgb(PALETTE.grassHigh), sstep(8, 120, h));
   const mottle = 0.5 + 0.5 * chartNoise(x * 2.3, z * 2.3);
   const grass = mixRgb(g, hexRgb(PALETTE.scrub), mottle * 0.45);
-  c = mixRgb(c, grass, sstep(3.8, 8.5, h));
+  c = mixRgb(c, grass, sstep(3.8, 8.5, hw));
   // Farmland takes the flat lowlands over from the grass: warped
   // plots, crop tones, plough rows, hedgerows and the ring tracks.
   const tinted = fieldTint(c, h, slope, x, z);
@@ -159,7 +166,6 @@ export function terrainBaseRgb(h, slope, x, z) {
   c = mixRgb(c, rock, rockAmt * sstep(6, 26, h));
   // Snow: an irregular line the noise pushes up one gully and down
   // the next, lying deep only where the slope is gentle enough to
-  // hold it, and streaked with blue shadow runs.
   const snowLine = 272 + chartNoise(x * 1.35, z * 1.35) * 42;
   const snowAmt = sstep(snowLine - 20, snowLine + 22, h) * (1 - sstep(0.75, 1.25, slope) * 0.7);
   if (snowAmt > 0) {
@@ -264,18 +270,28 @@ export function createCamera() {
 }
 
 // Chase camera: settles behind and above the tail, leaning into the bank so
-// the horizon tilts with the aeroplane instead of fighting it. Since
-export function chaseCamera(camera, plane, dt, snap = false) {
+// the horizon tilts with the aeroplane instead of fighting it. A posed
+export function chaseCamera(camera, plane, dt, snap = false, view = null) {
   const back = 10.5 + plane.speed * 0.02;
-  const tx = plane.x - Math.sin(plane.heading) * back;
-  const tz = plane.z + Math.cos(plane.heading) * back;
-  const ty = plane.y + 2.6;
+  const fx = Math.sin(plane.heading);
+  const fz = -Math.cos(plane.heading);
+  const side = view ? view.side : 0;
+  const tx = plane.x - fx * back + Math.cos(plane.heading) * side;
+  const tz = plane.z - fz * back + Math.sin(plane.heading) * side;
+  const ty = plane.y + (view ? view.up : 2.6);
   const k = snap ? 1 : Math.min(1, dt * 7);
   camera.x += (tx - camera.x) * k;
   camera.y += (ty - camera.y) * k;
   camera.z += (tz - camera.z) * k;
-  camera.heading = plane.heading;
-  camera.pitch = plane.pitch * 0.55 - 0.03;
+  if (view) {
+    const ax = plane.x + fx * view.aim - camera.x;
+    const az = plane.z + fz * view.aim - camera.z;
+    camera.heading = Math.atan2(ax, -az);
+    camera.pitch = Math.atan2(plane.y - camera.y, Math.hypot(ax, az)) + plane.pitch * 0.55;
+  } else {
+    camera.heading = plane.heading;
+    camera.pitch = plane.pitch * 0.55 - 0.03;
+  }
   camera.roll = plane.roll * 0.72;
 }
 
@@ -391,7 +407,6 @@ export function drawSea(ctx, project, camera, width, height, horizon) {
   ctx.fillRect(0, horizon, width, height - horizon);
   // A soft band of warm horizon haze straddling the waterline:
   // strongest exactly where sea meets sky, gone a few dozen pixels
-  // either way.
   const band = ctx.createLinearGradient(0, horizon - 14, 0, horizon + 64);
   band.addColorStop(0, 'rgba(232,201,154,0)');
   band.addColorStop(0.18, 'rgba(232,201,154,0.5)');
@@ -466,7 +481,8 @@ export function drawTerrain(ctx, project, plane) {
     // Adaptive subdivision: the ground under the aeroplane is cut
     // six ways, the mid-distance two, and the far hills two as well
     const dist = Math.sqrt(cell.d2);
-    const n = dist < 520 ? 8 : dist < 2400 ? (cell.h > 45 ? 3 : 2) : cell.h > 45 ? 2 : 1;
+    const shoreCell = cell.h > -9 && cell.h < 10;
+    const n = dist < 520 ? (shoreCell ? 12 : 8) : dist < 2400 ? (cell.h > 45 ? 3 : shoreCell ? 4 : 2) : cell.h > 45 ? 2 : 1;
     const pts = [];
     for (let j = 0; j <= n; j++) {
       for (let i = 0; i <= n; i++) {
@@ -503,7 +519,12 @@ export function drawTerrain(ctx, project, plane) {
         const cb = hazed(b);
         const cc = hazed(c);
         const cd = hazed(d);
-        ctx.fillStyle = `rgb(${Math.round((ca[0] + cb[0] + cc[0] + cd[0]) / 4)},${Math.round((ca[1] + cb[1] + cc[1] + cd[1]) / 4)},${Math.round((ca[2] + cb[2] + cc[2] + cd[2]) / 4)})`;
+        // Shore-band dither: a breath of per-quad hash grain, so the
+        // eye reads texture where the ramp steps, not a tiled grid.
+        const jit = shoreCell
+          ? 0.965 + cellHash(Math.round(cell.x / step) * 57 + i * 3, Math.round(cell.z / step) * 57 + j * 3) * 0.07
+          : 1;
+        ctx.fillStyle = `rgb(${Math.round(((ca[0] + cb[0] + cc[0] + cd[0]) / 4) * jit)},${Math.round(((ca[1] + cb[1] + cc[1] + cd[1]) / 4) * jit)},${Math.round(((ca[2] + cb[2] + cc[2] + cd[2]) / 4) * jit)})`;
         // Each corner pushed a hair outward from the quad's centre:
         // projected neighbours land on fractional pixels, and an
         if (a.clip || b.clip || c.clip || d.clip) {
@@ -765,7 +786,6 @@ function drawBroadleafTree(ctx, foot, w, hh, jitter) {
   }
   // Sun pass: smaller bright puffs riding the tops of the upper
   // puffs, stepped toward the sun, with a few flecks of the brightest
-  // green on the very crown.
   ctx.fillStyle = PALETTE.leafLit;
   for (const [px, py, pr] of CANOPY_PUFFS) {
     if (py < 0.05) continue;
@@ -793,7 +813,6 @@ export function drawRunways(ctx, project) {
     const hw = runway.width / 2;
     // The strip is drawn in segments along its length: on short final
     // the near end passes under the aeroplane, and a single all-or-
-    // nothing quad would vanish exactly when it matters most.
     const SEGMENTS = 10;
     ctx.fillStyle = PALETTE.runway;
     for (let sgm = 0; sgm < SEGMENTS; sgm++) {
@@ -928,7 +947,6 @@ export function drawTown(ctx, project, plane) {
     });
     // The golden-hour shadow: the whole footprint thrown west and a
     // step south by the low sun, longer than the house is tall — it
-    // grounds every block on its street instead of floating it.
     const sh = [0, 1, 2, 3].map((i) => project(
       block.x + (i === 1 || i === 2 ? hw : -hw) * c - (i >= 2 ? hd : -hd) * s - totalH * 1.05,
       base + 0.3,
@@ -942,7 +960,6 @@ export function drawTown(ctx, project, plane) {
     }
     // Walls shaded by their facing against SUN_DIR: the two sunward
     // faces glow cream, the lee faces sit a tone down — the town stops
-    // reading as flat cut-outs and starts reading as streets of houses.
     const faceLight = [0.86, 1.04, 0.94, 1.12];
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
@@ -991,7 +1008,6 @@ export function drawTown(ctx, project, plane) {
     }
     // The gables: both end walls rise as triangles into the roof,
     // in the wall's own colour at their face's light, so the house
-    // reads as a built thing with a pitch, not a box with a lid.
     ctx.fillStyle = shade(wallHex, faceLight[3]);
     ctx.beginPath();
     ctx.moveTo(t[3].x, t[3].y);
@@ -1168,7 +1184,6 @@ export function drawRing(ctx, project, ring, isNext, pulse) {
 export function drawClouds(ctx, project, plane, t) {
   // Each cloud is a cluster of puffs: a soft blue-grey underbelly laid
   // first, three to five white lobes over it, and one small bright cap
-  // where the sun strikes — volume instead of v1's flat white discs.
   for (let i = 0; i < 14; i++) {
     const cx = plane.x + ((i * 1733) % 5200) - 2600;
     const cz = plane.z + ((i * 1201) % 5200) - 2600;
@@ -1191,7 +1206,6 @@ export function drawClouds(ctx, project, plane, t) {
     }
     // The cap catches the low sun: a wide, flat amber wash laid
     // across the top — kept broad and soft, because a tight round
-    // cap reads as a yolk on a fried egg, not as light.
     ctx.fillStyle = 'rgba(255,196,120,0.5)';
     ctx.beginPath();
     ctx.ellipse(p.x + r * 0.3, p.y - r * 0.15, r * 0.55, r * 0.11, 0, 0, Math.PI * 2);
@@ -1297,7 +1311,6 @@ function drawBird(ctx, p, spanPx, flap, tilt) {
 
 // One projected quad, the brick every feature below is built from.
 // Corners are [x, y, z] world triples; a corner behind the camera
-// kills the quad quietly.
 function featureQuad(ctx, project, corners, fill) {
   const pts = corners.map(([x, y, z]) => project(x, y, z));
   if (pts.some((p) => !p)) return;
@@ -1397,7 +1410,6 @@ export function drawBridge(ctx, project) {
     ], '#6d5f4d');
     // A second, lower crossbar: two bars make a portal frame, and a
     // portal frame reads as a bridge tower even seen dead end-on —
-    // the view the Ring Run's chase camera actually gets.
     featureQuad(ctx, project, [
       [cxp - px * HW - ux * 1.1, deckY(tp) + 7.2, czp - pz * HW - uz * 1.1],
       [cxp + px * HW + ux * 1.1, deckY(tp) + 7.2, czp + pz * HW + uz * 1.1],
@@ -1534,7 +1546,6 @@ function drawBoat(ctx, project, boat, pose, t) {
   if (pose.moving) {
     // The wake: a pale fan astern that widens and fades as it
     // trails, a brighter churn at its heart, and a bow wave tick
-    // at each shoulder so the direction of travel reads at range.
     const trail = L * (boat.kind === 'coaster' ? 4.2 : 3.0);
     featureQuad(ctx, project, [
       at(-L * 0.5, -Wd * 0.34, 0.25), at(-L * 0.5, Wd * 0.34, 0.25),
@@ -1574,7 +1585,6 @@ function drawBoat(ctx, project, boat, pose, t) {
 
   // A box in boat-local space — wheelhouses, cabins, hatch covers
   // and crates are all this one brick at different addresses. Its
-  // two visible walls take the hull's sun split, its top the sky.
   const box = (a0, a1, halfAcross, y0, y1, top, lit, shade) => {
     featureQuad(ctx, project, [
       at(a0, -halfAcross, y1), at(a0, halfAcross, y1),
@@ -1595,7 +1605,6 @@ function drawBoat(ctx, project, boat, pose, t) {
   if (boat.kind === 'sail') {
     // Mast and two sails, cream canvas lit warm, heeled away from
     // the wind: the top of the rig leans across by a shear that
-    // grows with height, so the whole triangle tips as one cloth.
     const heel = (boat.heel || 1) * 0.16;
     const lean = (y) => heel * Math.max(0, y - freeboard);
     const mastTop = at(L * 0.05, lean(L * 1.12), L * 1.12);
@@ -1760,7 +1769,6 @@ export function drawPier(ctx, project) {
 
 // The harbour road: a dirt ribbon climbing from Porto Lume's streets
 // to the strip's south threshold — the line every approach crosses
-// on short final, tying the town to its aeroplanes.
 export function drawHarbourRoad(ctx, project) {
   const X = 2578;
   const Z0 = 2620;

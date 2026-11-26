@@ -1,12 +1,5 @@
 // aircraft-art.js — the Petrel herself, drawn twice: as the chase-view
 // aeroplane the camera follows and as the cockpit the pilot sits in.
-// Since v6 the chase aeroplane is REAL 3D GEOMETRY: a ring-built
-// fuselage, a glass canopy volume, thin wing and tail surfaces, gear
-// and a spinning prop, all defined in metres in her own frame,
-// rotated by the flight model's own heading, pitch and roll, lit
-// face by face against the world's one sun, and painted far-to-near
-// through the same projector that draws the terrain. She banks, and
-// the light moves across her flanks the way it should.
 
 import { PALETTE } from './config.js';
 import { groundHeight } from './terrain-archipelago.js';
@@ -20,7 +13,6 @@ const SUN = { x: SUN_DIR.x / SUN_LEN, y: SUN_DIR.y / SUN_LEN, z: SUN_DIR.z / SUN
 
 // The ground shadow: her silhouette thrown long to the west by the
 // low sun — an honest altitude cue, and at golden hour a dramatic
-// one. Two ellipses (wings across, body along) rotated to her track.
 export function drawAircraftShadow(ctx, project, plane) {
   const g = groundHeight(plane.x, plane.z);
   const alt = plane.y - g;
@@ -37,8 +29,6 @@ export function drawAircraftShadow(ctx, project, plane) {
   const fade = Math.max(0.05, 0.4 - alt / 2200);
   // The radii are clamped in screen space: the ellipse is a flat
   // billboard standing in for a shadow that really lies on a
-  // receding ground plane, and unclamped it swallows the whole
-  // frame whenever she rolls low over her own shadow.
   const rx = Math.min(p.scale * 10.5, 175);
   const ry = Math.min(p.scale * 3.6, 62);
   ctx.fillStyle = `rgba(10,26,34,${fade * 0.5})`;
@@ -54,8 +44,6 @@ export function drawAircraftShadow(ctx, project, plane) {
 
 // --- The airframe, in her own frame ---
 // Local axes: x to starboard, y up, z toward the nose. The fuselage
-// is a tube of eight-sided rings; every other part hangs off the
-// same numbers, so what the camera sees is one connected machine.
 
 const FUSELAGE_RINGS = [
   // [z, halfWidth, halfHeight, centreY]
@@ -86,7 +74,6 @@ function ringPoint(ring, k) {
 export function drawChaseAircraft(ctx, plane, width, height, t, project, camera) {
   // Her attitude basis: heading first, then pitch about her lateral
   // axis, then roll about her longitudinal axis — the same order the
-  // flight model flies her in.
   const F = { x: Math.sin(plane.heading), y: 0, z: -Math.cos(plane.heading) };
   const R = { x: Math.cos(plane.heading), y: 0, z: Math.sin(plane.heading) };
   const U = { x: 0, y: 1, z: 0 };
@@ -116,11 +103,12 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
   const glass = [];   // translucent, painted last: {pts, style}
   const addFace = (pts, hex) => faces.push({ pts, base: hexRgb(hex) });
 
-  // Fuselage tube: burnt orange over the cowling, cream aft of it.
+  // Fuselage tube: burnt orange over the cowling, a deep warm
+  // apricot aft of it — v9 richened the old washed-out cream, whose
   for (let sgm = 0; sgm < FUSELAGE_RINGS.length - 1; sgm++) {
     const ringA = FUSELAGE_RINGS[sgm];
     const ringB = FUSELAGE_RINGS[sgm + 1];
-    const base = sgm < 2 ? '#d84e2c' : '#f0e0bc';
+    const base = sgm < 2 ? '#d84e2c' : '#eab96f';
     for (let k = 0; k < 8; k++) {
       const k2 = (k + 1) % 8;
       addFace([
@@ -131,12 +119,10 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
   }
   // Nose and tail caps.
   addFace(FUSELAGE_RINGS[0].map((_, k) => ringPoint(FUSELAGE_RINGS[0], k)), '#b23a22');
-  addFace(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1].map((_, k) => ringPoint(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1], k)), '#e2cfa8');
+  addFace(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1].map((_, k) => ringPoint(FUSELAGE_RINGS[FUSELAGE_RINGS.length - 1], k)), '#e0af62');
 
   // The livery cheatline: a burnt-orange band riding both flanks
   // from the cabin to the tail cone, built as its own thin strip of
-  // faces a whisker proud of the skin (a 0.02 m offset), following
-  // the tube's taper ring by ring so it never floats or sinks.
   const bandPoint = (ring, side, angDeg) => {
     const a = (angDeg * Math.PI) / 180;
     return [
@@ -145,19 +131,21 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
       ring[0],
     ];
   };
-  for (let sgm = 2; sgm < FUSELAGE_RINGS.length - 1; sgm++) {
+  // v9: the band runs one ring further forward, stands taller on
+  // the flank and wears a deeper burnt umber — against the richer
+  for (let sgm = 1; sgm < FUSELAGE_RINGS.length - 1; sgm++) {
     const ringA = FUSELAGE_RINGS[sgm];
     const ringB = FUSELAGE_RINGS[sgm + 1];
     for (const side of [-1, 1]) {
       addFace([
-        bandPoint(ringA, side, 62), bandPoint(ringA, side, 102),
-        bandPoint(ringB, side, 102), bandPoint(ringB, side, 62),
-      ], '#d84e2c');
+        bandPoint(ringA, side, 55), bandPoint(ringA, side, 108),
+        bandPoint(ringB, side, 108), bandPoint(ringB, side, 55),
+      ], '#a83c1e');
     }
   }
 
   // The canopy: a glasshouse prism over the cabin, five points a
-  // section, its own darker blue lit by the same sun.
+  // section, its own darker blue lit by the same sun. v9 deepened
   const canopyPt = (sec, i) => {
     const [z, w, baseY, topY] = sec;
     const shape = [
@@ -170,11 +158,11 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
       addFace([
         canopyPt(CANOPY_SECTIONS[sgm], i), canopyPt(CANOPY_SECTIONS[sgm], i + 1),
         canopyPt(CANOPY_SECTIONS[sgm + 1], i + 1), canopyPt(CANOPY_SECTIONS[sgm + 1], i),
-      ], '#2e4d68');
+      ], '#1e3a4f');
     }
   }
-  addFace(CANOPY_SECTIONS[0].map((_, i) => canopyPt(CANOPY_SECTIONS[0], i)), '#27435c');
-  addFace(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1].map((_, i) => canopyPt(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1], i)), '#27435c');
+  addFace(CANOPY_SECTIONS[0].map((_, i) => canopyPt(CANOPY_SECTIONS[0], i)), '#16293a');
+  addFace(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1].map((_, i) => canopyPt(CANOPY_SECTIONS[CANOPY_SECTIONS.length - 1], i)), '#12222f');
 
   // Wings and tailplane: thin slabs with a dihedral rise, built per
   // side from span sections so the light breaks along the panel.
@@ -190,7 +178,6 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
       if (flapBase) {
         // The flap's own panel on the top rear: a shade step along
         // the hinge line so the wing's rear third reads as a
-        // separate surface, not one flat bar.
         const fA = A[2] + (A[3] - A[2]) * 0.62;
         const fB = B[2] + (B[3] - B[2]) * 0.62;
         addFace([
@@ -215,7 +202,7 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
     addFace([
       [tip[0], tip[1] + tip[4], tip[2]], [tip[0], tip[1] + tip[4], tip[3]],
       [tip[0], tip[1] - tip[4], tip[3]], [tip[0], tip[1] - tip[4], tip[2]],
-    ], '#f6ead2');
+    ], '#f3ddae');
   };
   for (const side of [-1, 1]) {
     slab([
@@ -247,7 +234,7 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
     [-3.60, 1.52], [-4.05, 1.58], [-4.18, 1.27], [-3.72, 1.23],
   ];
   for (const sx of [-0.058, 0.058]) {
-    addFace(FIN_TIP.map(([z, y]) => [sx, y, z]), '#f6ead2');
+    addFace(FIN_TIP.map(([z, y]) => [sx, y, z]), '#f3ddae');
   }
 
   // Gear: faired legs and real wheels — an octagon tyre, a hub, and
@@ -281,10 +268,6 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
 
   // The propeller disc and its blade ghosts go down BEFORE the
   // opaque faces: the disc lives at the far end of the aeroplane,
-  // so the airframe must paint over the part of it that sits behind
-  // the fuselage — painted last, it haloed the canopy like a
-  // target; painted first, only the honest rim beyond the skin
-  // shows, the way a real disc reads from a chase plane.
   if (plane.throttle > 0.03 || plane.speed > 4) {
     const discPts = [];
     for (let k = 0; k < 16; k++) {
@@ -341,7 +324,9 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
     const nl = Math.hypot(nx, ny, nz) || 1;
     nx /= nl; ny /= nl; nz /= nl;
     const dot = Math.max(0, nx * SUN.x + ny * SUN.y + nz * SUN.z);
-    const light = 0.63 + 0.52 * dot;
+    // v9: a lower floor and a wider swing — the shaded flank falls
+    // properly dark against the lit top, so the tube models round
+    const light = 0.55 + 0.6 * dot;
     const depth = proj.reduce((sum, p) => sum + p.depth, 0) / proj.length;
     painted.push({
       proj,
@@ -360,8 +345,6 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
 
   // Panel lines: three ring seams around the tube — cabin front,
   // cabin rear, tail cone — stroked segment by segment, and only
-  // where the skin actually faces the camera, so no line ever shows
-  // through the aeroplane's far side.
   ctx.strokeStyle = 'rgba(90,70,45,0.45)';
   ctx.lineWidth = 1.2;
   for (const ringIdx of [3, 4, 6]) {
@@ -394,7 +377,6 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
   }
   // Her name on the tail cone, painted the way working aeroplanes
   // carry it: anchored to the cone's own projected centre and laid
-  // along her lateral axis, so it banks with her.
   {
     const anchorW = toWorld([0, 0.18, -3.55]);
     const anchor = project(anchorW.x, anchorW.y, anchorW.z);
@@ -426,9 +408,6 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
 
   // The spinner: eight triangles from the prop's base ring to a
   // point ahead of it, burnt orange like the cowling it caps. It is
-  // painted without a depth test, so from astern — where the whole
-  // nose is behind the airframe — it must sit out entirely, or its
-  // apex prints through the canopy like a rivet.
   const noseView = F1.x * (camera.x - plane.x) + F1.y * (camera.y - plane.y) + F1.z * (camera.z - plane.z);
   const spinnerBase = [];
   for (let k = 0; k < 8; k++) {
@@ -454,13 +433,14 @@ export function drawChaseAircraft(ctx, plane, width, height, t, project, camera)
       ctx.fill();
     }
   }
-  // The canopy's sun streak: the right-top glass face painted once
+  // The canopy's sun streak: the right-top glass faces painted once
   // more in warm translucent light — late sun striking the greenhouse.
-  const streak = [
-    canopyLocal(2, 2), canopyLocal(2, 3), canopyLocal(1, 3), canopyLocal(1, 2),
-  ].map((lp) => { const w = toWorld(lp); return project(w.x, w.y, w.z); });
-  if (!streak.some((p) => !p)) {
-    ctx.fillStyle = 'rgba(255,214,150,0.32)';
+  for (const [secA, secB, alpha] of [[2, 1, 0.5], [1, 0, 0.36]]) {
+    const streak = [
+      canopyLocal(secA, 2), canopyLocal(secA, 3), canopyLocal(secB, 3), canopyLocal(secB, 2),
+    ].map((lp) => { const w = toWorld(lp); return project(w.x, w.y, w.z); });
+    if (streak.some((p) => !p)) continue;
+    ctx.fillStyle = `rgba(255,214,150,${alpha})`;
     ctx.beginPath();
     streak.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
     ctx.closePath();
@@ -486,9 +466,6 @@ function poly(ctx, pts) {
 
 // Cockpit view: the panel coaming and glareshield frame the windscreen;
 // the instruments themselves are instruments.js' job, mounted into the
-// panel this draws across the lower third — now with a lit top edge, a
-// stitched glareshield seam, bezel screws, the maker's placard and a
-// compass ball that actually swings with the heading.
 export function drawCockpitFrame(ctx, width, height, plane) {
   const panelTop = height * 0.68;
   const panelGrad = ctx.createLinearGradient(0, panelTop - 34, 0, height);

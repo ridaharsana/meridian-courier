@@ -1,7 +1,5 @@
 // main.js — Meridian Courier's frame: owns the canvas, the clock and the
 // order of a frame. Flight physics step, mission watch, camera settle,
-// then the world painted back to front — sky, sea, terrain, town, strips,
-// rings, the aeroplane and her shadow, the panel, the HUD, the words.
 
 import { createInput, attachInput, readInput } from './input.js';
 import { createGame, startSortie, handleToggle, endSortie, PHASES } from './game-state.js';
@@ -41,7 +39,7 @@ if (shotMode) {
 
 function snapCamera() {
   if (game.cameraMode === 'cockpit') cockpitCamera(camera, game.plane);
-  else chaseCamera(camera, game.plane, 1, true);
+  else chaseCamera(camera, game.plane, 1, true, game.shotCam || null);
 }
 
 let last = performance.now();
@@ -81,7 +79,7 @@ function frame(now) {
   }
 
   if (game.cameraMode === 'cockpit') cockpitCamera(camera, game.plane);
-  else chaseCamera(camera, game.plane, shotMode ? 1 : dt, shotMode);
+  else chaseCamera(camera, game.plane, shotMode ? 1 : dt, shotMode, shotMode ? game.shotCam || null : null);
   render(t);
   updateAudio(audio, game.plane);
   requestAnimationFrame(frame);
@@ -131,8 +129,6 @@ function render(t) {
   drawLandmarks(ctx, project);
   // The built world of v6: the Pilot Islet bridge, working boats
   // and the harbour road — the landmarks that make the chart a
-  // place. (A Vela waterfall was tried and cut in QA: at screenshot
-  // range it read as a scratch on the slope, not as water.)
   drawBridge(ctx, project);
   drawPier(ctx, project);
   drawBoats(ctx, project, t);

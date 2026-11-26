@@ -212,8 +212,10 @@ export function drawTerrain(ctx, project, plane) {
 }
 
 // Trees ride the terrain pass so painter's order keeps them behind
-// nearer hills: a cell grows 0–3 pines by its hash, only on gentle
-// grass — a dark cone with a sun-lit shoulder and a cast shadow fleck.
+// nearer hills: a cell grows 0–3 trees by its hash, only on gentle
+// grass. Two species by altitude, the way the real archipelago would
+// grow them: broadleaf park trees on the lowlands and coasts, pines
+// only up on Mount Vela's high slopes.
 function drawCellTrees(ctx, project, cell, kind, steep) {
   if (kind !== 'grass' || cell.h < 9 || cell.h > 165 || steep > 0.55) return;
   const step = WORLD.terrainStep;
@@ -233,23 +235,148 @@ function drawCellTrees(ctx, project, cell, kind, steep) {
     const w = Math.max(1.6, foot.scale * 7.5);
     const hh = foot.y - top.y;
     if (hh < 3) continue;
-    ctx.fillStyle = 'rgba(16,40,20,0.35)';
+    const jitter = 0.85 + 0.35 * cellHash(gx + i * 13, gz + i * 17);
+    if (th >= 100) drawPineTree(ctx, foot, w, hh);
+    else drawBroadleafTree(ctx, foot, w, hh, jitter);
+  }
+}
+
+// A pine: a dark cone with a sun-lit shoulder and a cast shadow fleck.
+function drawPineTree(ctx, foot, w, hh) {
+  ctx.fillStyle = 'rgba(16,40,20,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(foot.x + w * 0.5, foot.y, w * 0.9, w * 0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.treeDark;
+  ctx.beginPath();
+  ctx.moveTo(foot.x, foot.y - hh);
+  ctx.lineTo(foot.x + w, foot.y);
+  ctx.lineTo(foot.x - w, foot.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = PALETTE.treeLight;
+  ctx.beginPath();
+  ctx.moveTo(foot.x, foot.y - hh);
+  ctx.lineTo(foot.x + w, foot.y);
+  ctx.lineTo(foot.x + w * 0.18, foot.y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// The leaf puffs of one broadleaf crown: [across, up, radius] in units
+// of the canopy radius, up measured from the crown's centre. No two
+// puffs share a radius and the rim puffs sit proud of the core, so the
+// silhouette stays as irregular as a real tree's.
+const CANOPY_PUFFS = [
+  [0, 0.08, 0.6],
+  [-0.52, -0.04, 0.44],
+  [0.54, 0, 0.46],
+  [-0.3, 0.32, 0.42],
+  [0.32, 0.34, 0.44],
+  [0.02, 0.46, 0.38],
+  [-0.64, -0.3, 0.33],
+  [0.66, -0.28, 0.35],
+  [0.04, -0.32, 0.4],
+];
+
+// A broadleaf tree modelled on a real park tree: a tapered grey-brown
+// trunk that splits into branches, carrying a big rounded crown of
+// clustered leaf puffs in three greens laid down by the sun — a dark
+// underside, a rich mid body, and a bright cap on the sunward top.
+function drawBroadleafTree(ctx, foot, w, hh, jitter) {
+  const crownR = w * 1.05 * jitter;
+  const crownY = foot.y - hh * 0.72;
+  // Soft ground shadow, thrown away from the sun.
+  ctx.fillStyle = 'rgba(16,40,20,0.32)';
+  ctx.beginPath();
+  ctx.ellipse(foot.x - crownR * 0.18, foot.y, crownR * 0.95, crownR * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Trunk: a tapered post, its shaded side a step darker, splitting
+  // into two branch strokes that reach into the crown's lower puffs.
+  const trunkTop = foot.y - hh * 0.48;
+  const baseHalf = Math.max(0.7, crownR * 0.075);
+  const topHalf = Math.max(0.4, crownR * 0.04);
+  ctx.fillStyle = PALETTE.trunk;
+  ctx.beginPath();
+  ctx.moveTo(foot.x - baseHalf, foot.y);
+  ctx.lineTo(foot.x - topHalf, trunkTop);
+  ctx.lineTo(foot.x + topHalf, trunkTop);
+  ctx.lineTo(foot.x + baseHalf, foot.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = PALETTE.trunkShade;
+  ctx.beginPath();
+  ctx.moveTo(foot.x - baseHalf, foot.y);
+  ctx.lineTo(foot.x - topHalf, trunkTop);
+  ctx.lineTo(foot.x, trunkTop);
+  ctx.lineTo(foot.x, foot.y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = PALETTE.trunkShade;
+  ctx.lineWidth = Math.max(0.6, crownR * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(foot.x, trunkTop + crownR * 0.06);
+  ctx.lineTo(foot.x - crownR * 0.34, crownY + crownR * 0.18);
+  ctx.moveTo(foot.x, trunkTop + crownR * 0.06);
+  ctx.lineTo(foot.x + crownR * 0.36, crownY + crownR * 0.14);
+  ctx.stroke();
+  if (hh < 7) {
+    // Too far off for puff detail: one dark blob with a lit top reads
+    // as a leafy crown at range and costs two arcs.
+    ctx.fillStyle = PALETTE.leafDark;
     ctx.beginPath();
-    ctx.ellipse(foot.x + w * 0.5, foot.y, w * 0.9, w * 0.3, 0, 0, Math.PI * 2);
+    ctx.arc(foot.x, crownY + crownR * 0.12, crownR * 0.92, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = PALETTE.treeDark;
+    ctx.fillStyle = PALETTE.leafMid;
     ctx.beginPath();
-    ctx.moveTo(foot.x, top.y);
-    ctx.lineTo(foot.x + w, foot.y);
-    ctx.lineTo(foot.x - w, foot.y);
-    ctx.closePath();
+    ctx.arc(foot.x, crownY, crownR * 0.88, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = PALETTE.treeLight;
+    ctx.fillStyle = PALETTE.leafLit;
     ctx.beginPath();
-    ctx.moveTo(foot.x, top.y);
-    ctx.lineTo(foot.x + w, foot.y);
-    ctx.lineTo(foot.x + w * 0.18, foot.y);
-    ctx.closePath();
+    ctx.arc(foot.x + crownR * 0.18, crownY - crownR * 0.3, crownR * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  // Underside pass: every puff dropped a step and painted dark, so
+  // the crown's belly sits in its own shade.
+  ctx.fillStyle = PALETTE.leafDark;
+  for (const [px, py, pr] of CANOPY_PUFFS) {
+    if (pr < 0.38) continue; // the small rim puffs carry no underside
+    ctx.beginPath();
+    ctx.arc(foot.x + px * crownR, crownY - py * crownR + crownR * 0.13, pr * crownR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Body pass: the puffs themselves in the mid green.
+  ctx.fillStyle = PALETTE.leafMid;
+  for (const [px, py, pr] of CANOPY_PUFFS) {
+    ctx.beginPath();
+    ctx.arc(foot.x + px * crownR, crownY - py * crownR, pr * crownR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Texture pass: small dark flecks tucked into the lower puffs, so
+  // the mid green reads as clusters of leaves instead of one flat fill.
+  ctx.fillStyle = PALETTE.leafDark;
+  for (const [px, py, pr] of CANOPY_PUFFS) {
+    if (py > 0.1 || hh < 9) continue;
+    ctx.beginPath();
+    ctx.arc(foot.x + (px - 0.12) * crownR, crownY - (py - 0.1) * crownR, pr * crownR * 0.34, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Sun pass: smaller bright puffs riding the tops of the upper
+  // puffs, stepped toward the sun, with a few flecks of the brightest
+  // green on the very crown.
+  ctx.fillStyle = PALETTE.leafLit;
+  for (const [px, py, pr] of CANOPY_PUFFS) {
+    if (py < 0.05) continue;
+    ctx.beginPath();
+    ctx.arc(foot.x + (px + 0.13) * crownR, crownY - (py + 0.13) * crownR, pr * crownR * 0.58, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = PALETTE.leafBright;
+  for (const [px, py, pr] of CANOPY_PUFFS) {
+    if (py < 0.3) continue;
+    ctx.beginPath();
+    ctx.arc(foot.x + (px + 0.2) * crownR, crownY - (py + 0.24) * crownR, pr * crownR * 0.3, 0, Math.PI * 2);
     ctx.fill();
   }
 }

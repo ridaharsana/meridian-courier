@@ -59,6 +59,15 @@ export const PALETTE = {
   grassHigh: '#4d7d43',
   treeDark: '#2e5d33',
   treeLight: '#4c8148',
+  // Broadleaf tones, taken from a real park tree's crown: a grey-brown
+  // trunk, a deep shaded underside, a rich mid green for the body of
+  // the canopy and a yellow-green cap where the sun lands.
+  trunk: '#6d5942',
+  trunkShade: '#463727',
+  leafDark: '#27512a',
+  leafMid: '#4b8a38',
+  leafLit: '#86c34a',
+  leafBright: '#b5dd6a',
   rock: '#8d8578',
   rockDark: '#6d675c',
   snow: '#f4f7f5',

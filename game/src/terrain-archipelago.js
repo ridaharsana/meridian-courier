@@ -88,12 +88,28 @@ function buildTownBlocks() {
       if (next() < 0.22) continue; // a gap: the plaza, the church green
       const x = lume.x + gx * 86 + (next() - 0.5) * 22;
       const z = lume.z + 250 + gz * 80 + (next() - 0.5) * 18;
+      // Since v7 a block is a house, not a box: the walk now also
+      // deals its kind (a low cottage, a two-storey house, or one
+      // of the harbour's long warehouses on the town's sea edge),
+      // its wall and roof colours from the town's small stock, a
+      // chimney for the houses that burn driftwood, a door face,
+      // and a garden for the plots that kept a tree.
+      const typeRoll = next();
+      const type = gz === 0 && typeRoll < 0.3 ? 'warehouse'
+        : typeRoll < 0.52 ? 'cottage' : 'house';
       blocks.push({
         x, z,
-        w: 30 + next() * 22,
-        d: 26 + next() * 18,
-        h: 13 + next() * 17,
+        w: type === 'warehouse' ? 46 + next() * 20 : 28 + next() * 20,
+        d: type === 'warehouse' ? 24 + next() * 8 : 24 + next() * 16,
+        h: type === 'cottage' ? 9 + next() * 5
+          : type === 'warehouse' ? 11 + next() * 4 : 14 + next() * 8,
         rot: (next() - 0.5) * 0.24,
+        type,
+        wall: Math.floor(next() * 4),
+        roof: Math.floor(next() * 3),
+        chimney: type !== 'warehouse' && next() < 0.55,
+        garden: next() < 0.42,
+        door: Math.floor(next() * 4),
       });
     }
   }

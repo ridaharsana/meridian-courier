@@ -6,7 +6,7 @@
 // pilot can read at a glance.
 
 import { WORLD, PALETTE, RUNWAYS, ISLANDS } from './config.js';
-import { groundHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
+import { groundHeight, surfaceKind, chartNoise, runwayFrame, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
 
 // The sun's direction, one for the whole world — and, since v6,
 // shared with aircraft-art.js so the aeroplane is lit by the same
@@ -643,18 +643,54 @@ export function drawTerrain(ctx, project, plane) {
 }
 
 // Trees ride the terrain pass so painter's order keeps them behind
-// nearer hills: a cell grows 0–3 trees by its hash, only on gentle
-// grass. Two species by altitude, the way the real archipelago would
-// grow them: broadleaf park trees on the lowlands and coasts, pines
-// only up on Mount Vela's high slopes.
+// nearer hills. Two species by altitude, the way the real
+// archipelago would grow them: broadleaf park trees on the lowlands
+// and coasts, pines only up on Mount Vela's high slopes. Since v7
+// the woods come the way woods do — in patches, not sprinkles: a
+// low-frequency grove chart thickens whole hillsides into forest,
+// the shore fringe crowds the coast just above the sand, trees
+// stand in clusters off both strips' shoulders, and a lone line
+// tree marks the farmland's own hedgerows where a plot boundary
+// crosses an otherwise empty cell.
 function drawCellTrees(ctx, project, cell, kind, steep) {
-  if (kind !== 'grass' || cell.h < 9 || cell.h > 165 || steep > 0.55) return;
+  if (kind !== 'grass' || cell.h < 9 || cell.h > 165 || steep > 0.6) return;
   const step = WORLD.terrainStep;
   const gx = Math.round(cell.x / step);
   const gz = Math.round(cell.z / step);
   const hash = cellHash(gx, gz);
-  if (hash < 0.42) return;
-  const count = hash > 0.86 ? 3 : hash > 0.64 ? 2 : 1;
+  const cxm = cell.x + step / 2;
+  const czm = cell.z + step / 2;
+  const grove = chartNoise(cxm * 1.6 + 31, czm * 1.6 - 17);
+  let threshold = 0.44;
+  let maxCount = 3;
+  if (grove > 0.16) { threshold = 0.08; maxCount = 5; }
+  else if (grove > -0.08) { threshold = 0.27; maxCount = 4; }
+  if (cell.h < 13) threshold = Math.min(threshold, 0.2); // shore fringe
+  for (const runway of RUNWAYS) {
+    const f = runwayFrame(runway, cxm, czm);
+    if (Math.abs(f.across) > 58 && Math.abs(f.across) < 175
+      && Math.abs(f.along) < runway.length / 2 + 175) {
+      threshold = Math.min(threshold, 0.16); // strip-side clusters
+    }
+  }
+  let count = 0;
+  if (hash >= threshold) {
+    count = hash > 0.9 ? maxCount : hash > 0.72 ? Math.min(3, maxCount) : hash > 0.52 ? 2 : 1;
+  }
+  if (!count && cell.h > 6 && cell.h < 52 && steep < 0.48 && !inTownGround(cxm, czm)) {
+    // Hedgerow: the farmland grid, warped exactly as fieldTint
+    // warps it — a cell its boundary crosses grows one line tree.
+    const ca = 0.951;
+    const sa = 0.309;
+    const ru = cxm * ca + czm * sa + 115 * chartNoise(cxm * 6, czm * 6);
+    const rv = -cxm * sa + czm * ca + 115 * chartNoise(czm * 6 + 40, cxm * 6 - 25);
+    const fu = ru / 235;
+    const fv = rv / 235;
+    const eu = Math.min(fu - Math.floor(fu), Math.ceil(fu) - fu);
+    const ev = Math.min(fv - Math.floor(fv), Math.ceil(fv) - fv);
+    if (Math.min(eu, ev) < 0.09 && cellHash(gx + 31, gz - 7) > 0.3) count = 1;
+  }
+  if (!count) return;
   for (let i = 0; i < count; i++) {
     const tx = cell.x + step * (0.22 + 0.56 * cellHash(gx + i * 7, gz - i * 3));
     const tz = cell.z + step * (0.2 + 0.58 * cellHash(gx - i * 5, gz + i * 11));
@@ -767,6 +803,34 @@ function drawBroadleafTree(ctx, foot, w, hh, jitter) {
     ctx.beginPath();
     ctx.arc(foot.x + crownR * 0.18, crownY - crownR * 0.3, crownR * 0.45, 0, Math.PI * 2);
     ctx.fill();
+    return;
+  }
+  if (hh < 15) {
+    // Middle distance — the forest's working range now that the
+    // woods are dense: underside, a five-puff body and the lit
+    // caps, without the texture flecks. The crown's read survives;
+    // its arc bill is a third of the full tree's.
+    ctx.fillStyle = PALETTE.leafDark;
+    for (const [px, py, pr] of CANOPY_PUFFS) {
+      if (pr < 0.42) continue;
+      ctx.beginPath();
+      ctx.arc(foot.x + px * crownR, crownY - py * crownR + crownR * 0.13, pr * crownR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = PALETTE.leafMid;
+    for (let pi = 0; pi < 5; pi++) {
+      const [px, py, pr] = CANOPY_PUFFS[pi];
+      ctx.beginPath();
+      ctx.arc(foot.x + px * crownR, crownY - py * crownR, pr * crownR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = PALETTE.leafLit;
+    for (let pi = 3; pi < 6; pi++) {
+      const [px, py, pr] = CANOPY_PUFFS[pi];
+      ctx.beginPath();
+      ctx.arc(foot.x + (px + 0.13) * crownR, crownY - (py + 0.13) * crownR, pr * crownR * 0.58, 0, Math.PI * 2);
+      ctx.fill();
+    }
     return;
   }
   // Underside pass: every puff dropped a step and painted dark, so
@@ -922,6 +986,14 @@ export function drawRunways(ctx, project) {
   }
 }
 
+// Porto Lume's housing stock (v7): a small set of wall and roof
+// colours the town walk deals from — limewash white, pale cream,
+// terracotta render and stone grey under terracotta, slate and
+// dark-brown roofs — so the streets vary the way a real town's do
+// without ever leaving the golden-hour grade.
+const TOWN_WALLS = ['#e8dcc3', '#f0e7d2', '#d9a37e', '#b7ad9c'];
+const TOWN_ROOFS = ['#b5542f', '#5d6a72', '#7a4a30'];
+
 export function drawTown(ctx, project, plane) {
   const sorted = [...TOWN_BLOCKS].sort((a, b) =>
     (dist2(b, plane) - dist2(a, plane)));
@@ -938,13 +1010,30 @@ export function drawTown(ctx, project, plane) {
     if (t.some((p) => !p)) continue;
     const b = [corner(-hw, -hd, base), corner(hw, -hd, base), corner(hw, hd, base), corner(-hw, hd, base)];
     if (b.some((p) => !p)) continue;
+    // The pitched roof, dealt in metres and laid out in screen
+    // space from the eaves corners: a ridge running the house's
+    // long axis, raised by the roof's own height — cottages steep,
+    // warehouses shallow. The gable ends and both slopes hang off
+    // these two ridge points.
+    const roofH = Math.min(block.w, block.d)
+      * (block.type === 'warehouse' ? 0.18 : block.type === 'cottage' ? 0.42 : 0.33);
+    const totalH = block.h + roofH;
+    const ridgePx = Math.max(2.5, t[0].scale * roofH);
+    const r0 = { x: (t[0].x + t[3].x) / 2, y: (t[0].y + t[3].y) / 2 - ridgePx };
+    const r1 = { x: (t[1].x + t[2].x) / 2, y: (t[1].y + t[2].y) / 2 - ridgePx };
+    const wallHex = TOWN_WALLS[block.wall % TOWN_WALLS.length];
+    const roofHex = TOWN_ROOFS[block.roof % TOWN_ROOFS.length];
+    const facePoint = (i, j, fx, fy) => ({
+      x: t[i].x + (t[j].x - t[i].x) * fx + (b[i].x - t[i].x) * fy,
+      y: t[i].y + (t[j].y - t[i].y) * fx + (b[i].y - t[i].y) * fy,
+    });
     // The golden-hour shadow: the whole footprint thrown west and a
     // step south by the low sun, longer than the house is tall — it
     // grounds every block on its street instead of floating it.
     const sh = [0, 1, 2, 3].map((i) => project(
-      block.x + (i === 1 || i === 2 ? hw : -hw) * c - (i >= 2 ? hd : -hd) * s - block.h * 1.05,
+      block.x + (i === 1 || i === 2 ? hw : -hw) * c - (i >= 2 ? hd : -hd) * s - totalH * 1.05,
       base + 0.3,
-      block.z + (i === 1 || i === 2 ? hw : -hw) * s + (i >= 2 ? hd : -hd) * c + block.h * 0.6));
+      block.z + (i === 1 || i === 2 ? hw : -hw) * s + (i >= 2 ? hd : -hd) * c + totalH * 0.6));
     if (!sh.some((p) => !p)) {
       ctx.fillStyle = 'rgba(24,30,26,0.26)';
       ctx.beginPath();
@@ -958,7 +1047,7 @@ export function drawTown(ctx, project, plane) {
     const faceLight = [0.86, 1.04, 0.94, 1.12];
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
-      ctx.fillStyle = shade(PALETTE.townWall, faceLight[i]);
+      ctx.fillStyle = shade(wallHex, faceLight[i]);
       ctx.beginPath();
       ctx.moveTo(b[i].x, b[i].y);
       ctx.lineTo(b[j].x, b[j].y);
@@ -966,48 +1055,128 @@ export function drawTown(ctx, project, plane) {
       ctx.lineTo(t[i].x, t[i].y);
       ctx.closePath();
       ctx.fill();
-      // Windows: two rows of panes on faces wide enough to carry
-      // them, skipped the moment a house is too far to read. At
-      // golden hour half the town has its lamps on: panes alternate
-      // warm-lit amber and dark glass by the house's own hash.
+      // Windows with frames: a dark timber frame first, then the
+      // glass set into it — at golden hour half the town has its
+      // lamps on, so panes alternate warm amber and dark glass by
+      // the house's own hash. Two-storey houses carry two rows,
+      // cottages and warehouses one. And on its dealt face, a
+      // house gets a door: a dark leaf with a paler step, standing
+      // on the street line at the wall's foot.
       const faceW = Math.hypot(t[j].x - t[i].x, t[j].y - t[i].y);
       const faceH = Math.hypot(b[i].x - t[i].x, b[i].y - t[i].y);
-      if (faceW > 26 && faceH > 9) {
-        for (const fy of [0.34, 0.68]) {
-          for (const fxn of [0.26, 0.55, 0.8]) {
-            const lit = cellHash(Math.round(block.x + fxn * 91 + i * 7), Math.round(block.z + fy * 57)) > 0.45;
-            ctx.fillStyle = lit ? 'rgba(255,183,92,0.92)' : 'rgba(58,72,88,0.85)';
-            const wx = t[i].x + (t[j].x - t[i].x) * fxn + (b[i].x - t[i].x) * fy;
-            const wy = t[i].y + (t[j].y - t[i].y) * fxn + (b[i].y - t[i].y) * fy;
-            ctx.fillRect(wx - 1.3, wy - 1.6, 2.6, 3.2);
+      if (faceW > 24 && faceH > 9) {
+        const cols = block.type === 'warehouse' ? 3 : faceW > 46 ? 3 : 2;
+        const rows = block.type === 'house' ? 2 : 1;
+        for (let rowI = 0; rowI < rows; rowI++) {
+          const fy = rows === 2 ? 0.3 + rowI * 0.36 : 0.4;
+          for (let colI = 0; colI < cols; colI++) {
+            const fxn = (colI + 0.5) / cols;
+            if (i === block.door && rowI === rows - 1 && colI === Math.floor(cols / 2)) continue;
+            const lit = cellHash(Math.round(block.x + fxn * 91 + i * 7 + rowI * 13), Math.round(block.z + fy * 57)) > 0.45;
+            const wp = facePoint(i, j, fxn, fy);
+            const ww = Math.max(1.7, faceW * 0.06);
+            const wh = Math.max(2.1, faceH * 0.17);
+            ctx.fillStyle = 'rgba(52,40,30,0.92)';
+            ctx.fillRect(wp.x - ww / 2 - 0.8, wp.y - wh / 2 - 0.8, ww + 1.6, wh + 1.6);
+            ctx.fillStyle = lit ? 'rgba(255,186,96,0.95)' : 'rgba(52,66,82,0.92)';
+            ctx.fillRect(wp.x - ww / 2, wp.y - wh / 2, ww, wh);
           }
+        }
+        if (i === block.door) {
+          const dp = facePoint(i, j, 0.5, 1);
+          const dw = Math.max(2.2, faceW * 0.075);
+          const dh = faceH * (block.type === 'warehouse' ? 0.52 : 0.36);
+          ctx.fillStyle = 'rgba(52,40,30,0.92)';
+          ctx.fillRect(dp.x - dw / 2 - 0.8, dp.y - dh - 0.4, dw + 1.6, dh + 0.8);
+          ctx.fillStyle = block.type === 'warehouse' ? '#6b5a49' : '#4a3826';
+          ctx.fillRect(dp.x - dw / 2, dp.y - dh, dw, dh);
+          ctx.fillStyle = 'rgba(230,222,204,0.55)';
+          ctx.fillRect(dp.x - dw / 2 - 1.1, dp.y - 1.1, dw + 2.2, 1.1);
         }
       }
     }
-    // The roof: a raised cap inset from the eaves, sun-lit on top,
-    // with a ridge line running its long axis.
+    // The gables: both end walls rise as triangles into the roof,
+    // in the wall's own colour at their face's light, so the house
+    // reads as a built thing with a pitch, not a box with a lid.
+    ctx.fillStyle = shade(wallHex, faceLight[3]);
+    ctx.beginPath();
+    ctx.moveTo(t[3].x, t[3].y);
+    ctx.lineTo(t[0].x, t[0].y);
+    ctx.lineTo(r0.x, r0.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = shade(wallHex, faceLight[1]);
+    ctx.beginPath();
+    ctx.moveTo(t[1].x, t[1].y);
+    ctx.lineTo(t[2].x, t[2].y);
+    ctx.lineTo(r1.x, r1.y);
+    ctx.closePath();
+    ctx.fill();
+    // The roof itself: two slopes off the ridge, the eaves pushed
+    // a step past the walls so they throw their thin shadow line,
+    // the sunward slope lit, the lee slope down — and a dark
+    // ridge stroke to finish the silhouette.
     const cxT = { x: (t[0].x + t[2].x) / 2, y: (t[0].y + t[2].y) / 2 };
-    const cap = t.map((p) => ({
-      x: cxT.x + (p.x - cxT.x) * 0.82,
-      y: cxT.y + (p.y - cxT.y) * 0.82 - Math.max(1, p.scale * 2.2),
-      scale: p.scale,
+    const ev = t.map((p) => ({
+      x: cxT.x + (p.x - cxT.x) * 1.09,
+      y: cxT.y + (p.y - cxT.y) * 1.09 - Math.max(0.4, p.scale * 0.4),
     }));
-    ctx.fillStyle = shade(PALETTE.townRoof, 0.82);
+    ctx.fillStyle = shade(roofHex, 0.72);
     ctx.beginPath();
-    t.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.moveTo(ev[3].x, ev[3].y);
+    ctx.lineTo(ev[2].x, ev[2].y);
+    ctx.lineTo(r1.x, r1.y);
+    ctx.lineTo(r0.x, r0.y);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = shade(PALETTE.townRoof, 1.12);
+    ctx.fillStyle = shade(roofHex, 1.1);
     ctx.beginPath();
-    cap.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.moveTo(ev[0].x, ev[0].y);
+    ctx.lineTo(ev[1].x, ev[1].y);
+    ctx.lineTo(r1.x, r1.y);
+    ctx.lineTo(r0.x, r0.y);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = 'rgba(90,40,20,0.6)';
+    ctx.strokeStyle = 'rgba(46,26,16,0.65)';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo((cap[0].x + cap[3].x) / 2, (cap[0].y + cap[3].y) / 2);
-    ctx.lineTo((cap[1].x + cap[2].x) / 2, (cap[1].y + cap[2].y) / 2);
+    ctx.moveTo(r0.x, r0.y);
+    ctx.lineTo(r1.x, r1.y);
     ctx.stroke();
+    // A chimney for the houses that burn driftwood: a small stone
+    // stack standing through the ridge, two-thirds along it.
+    if (block.chimney) {
+      const cb = { x: r0.x + (r1.x - r0.x) * 0.68, y: r0.y + (r1.y - r0.y) * 0.68 };
+      const cw = Math.max(1.1, t[0].scale * 1.5);
+      const ch = Math.max(2, t[0].scale * 3.6);
+      ctx.fillStyle = '#8d8272';
+      ctx.beginPath();
+      ctx.moveTo(cb.x - cw, cb.y + 1);
+      ctx.lineTo(cb.x + cw * 0.5, cb.y + 1);
+      ctx.lineTo(cb.x + cw * 0.5, cb.y - ch);
+      ctx.lineTo(cb.x - cw, cb.y - ch);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#5d5546';
+      ctx.fillRect(cb.x - cw - 0.5, cb.y - ch - 1, cw * 1.5 + 1, 1.6);
+    }
+    // The garden plots kept a tree: one broadleaf standing off the
+    // house's east corner, in the same paint as the hills' woods.
+    if (block.garden) {
+      const gx2 = block.x + (hw + 9) * c - (hd * 0.35) * s;
+      const gz2 = block.z + (hw + 9) * s + (hd * 0.35) * c;
+      const gh = groundHeight(gx2, gz2);
+      const foot = project(gx2, gh, gz2);
+      const gtop = project(gx2, gh + 12, gz2);
+      if (foot && gtop) {
+        const gw = Math.max(1.6, foot.scale * 7);
+        const ghh = foot.y - gtop.y;
+        if (ghh >= 3) {
+          drawBroadleafTree(ctx, foot, gw, ghh,
+            0.85 + 0.35 * cellHash(Math.round(gx2), Math.round(gz2)));
+        }
+      }
+    }
   }
 }
 
@@ -1138,30 +1307,112 @@ export function drawClouds(ctx, project, plane, t) {
     ctx.ellipse(p.x + r * 0.3, p.y - r * 0.15, r * 0.55, r * 0.11, 0, 0, Math.PI * 2);
     ctx.fill();
   }
-  // A skein of gulls working the strait off Home Isle: six birds in
-  // a loose vee, wings beating slow — the smallest moving thing in
-  // the sky, and the one that makes the air feel inhabited.
-  const flockX = 700 + Math.sin(t * 0.05) * 30;
-  const flockY = 235 + Math.sin(t * 0.4) * 4;
-  const flockZ = 820;
-  ctx.strokeStyle = 'rgba(28,38,48,0.8)';
-  ctx.lineWidth = 1.4;
-  for (let bIdx = 0; bIdx < 6; bIdx++) {
-    const row = Math.ceil(bIdx / 2);
-    const sideB = bIdx === 0 ? 0 : bIdx % 2 ? 1 : -1;
-    const bp = project(
-      flockX + sideB * row * 16,
-      flockY - row * 2.5,
-      flockZ + row * 13);
-    if (!bp) continue;
-    const wHalf = Math.max(1.8, bp.scale * 4.4);
-    const flap = Math.sin(t * 6 + bIdx * 1.3) * wHalf * 0.55;
-    ctx.beginPath();
-    ctx.moveTo(bp.x - wHalf, bp.y - flap);
-    ctx.lineTo(bp.x, bp.y + Math.abs(flap) * 0.25);
-    ctx.lineTo(bp.x + wHalf, bp.y - flap);
-    ctx.stroke();
+  drawBirdFlocks(ctx, project, t);
+}
+
+// --- Birds: the living layer (v7) ---
+// v6's single skein of six gulls read as specks in the screenshots —
+// at contact-sheet size a bird is only a bird if its wingspan runs
+// to ten pixels or better, so the flocks now work routes that bring
+// them within a couple of hundred metres of the cameras a pilot
+// actually flies: one crosses the Ring Run's gate line, one works
+// the Porto Lume shore across the approach, one quarters the home
+// fields by Meridian Field, and two more keep the far sky honest
+// for anyone flying the chart for real. Each flock circles its
+// anchor on a slow ellipse, its birds trailing in a loose vee,
+// wings beating out of phase so the vee ripples instead of marching.
+const BIRD_FLOCKS = [
+  { ax: 520, ay: 258, az: 1060, r: 46, speed: 0.02, phase: 3.52, n: 7, span: 4.6 },
+  { ax: 2560, ay: 165, az: 2790, r: 60, speed: -0.017, phase: 1.87, n: 6, span: 4.0 },
+  { ax: -10, ay: 100, az: 1645, r: 78, speed: 0.024, phase: 4.2, n: 5, span: 4.2 },
+  { ax: 700, ay: 235, az: 820, r: 60, speed: 0.05, phase: 0, n: 6, span: 3.4 },
+  { ax: 1500, ay: 335, az: -350, r: 260, speed: -0.013, phase: 1.1, n: 5, span: 3.4 },
+];
+
+function drawBirdFlocks(ctx, project, t) {
+  for (const flock of BIRD_FLOCKS) {
+    const a = flock.phase + t * flock.speed;
+    const cx = flock.ax + Math.cos(a) * flock.r;
+    const cz = flock.az + Math.sin(a) * flock.r * 0.7;
+    const cy = flock.ay + Math.sin(t * 0.45 + flock.phase) * 3.5;
+    // The flock's heading from the ellipse's own derivative, so the
+    // vee trails behind the direction of travel and banks with it.
+    let hx = -Math.sin(a) * flock.r * Math.sign(flock.speed);
+    let hz = Math.cos(a) * flock.r * 0.7 * Math.sign(flock.speed);
+    const hl = Math.hypot(hx, hz) || 1;
+    hx /= hl; hz /= hl;
+    const px = -hz; // the vee's left-right axis
+    const pz = hx;
+    const bank = Math.max(-0.35, Math.min(0.35, flock.speed * 9));
+    for (let i = flock.n - 1; i >= 0; i--) {
+      const row = Math.ceil(i / 2);
+      const side = i === 0 ? 0 : i % 2 ? 1 : -1;
+      const bx = cx - hx * row * 6.2 + px * side * row * 5.4;
+      const bz = cz - hz * row * 6.2 + pz * side * row * 5.4;
+      const by = cy - row * 1.6 + Math.sin(t * 1.7 + i * 2.1) * 0.7;
+      const bp = project(bx, by, bz);
+      if (!bp) continue;
+      const spanPx = bp.scale * flock.span;
+      if (spanPx < 2.2) continue; // a sub-pixel bird is noise, not life
+      drawBird(ctx, bp, spanPx, t * 7.5 + i * 0.85, bank + side * 0.06);
+    }
   }
+}
+
+// One gull at screen point p: a pale body with a grey back, two
+// wings jointed at the shoulder, the outer third of each wing a
+// dark tip. The wings are thick strokes, not hairlines — at ten
+// pixels of span a hairline vanishes, a stroke still reads as a
+// wing. Flap phase lifts the tips through the shoulder line and
+// drops them below it, the way a real gull's beat does.
+function drawBird(ctx, p, spanPx, flap, tilt) {
+  const hx = spanPx * 0.5;
+  const lift = Math.sin(flap) * spanPx * 0.34;
+  const cosT = Math.cos(tilt);
+  const sinT = Math.sin(tilt);
+  const pt = (ox, oy) => [
+    p.x + ox * cosT - oy * sinT,
+    p.y + ox * sinT + oy * cosT,
+  ];
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // Far wing first, a step greyer — it sits behind the body.
+  const fj = pt(-hx * 0.48, -lift * 0.45);
+  const ft = pt(-hx, -lift * 0.9);
+  ctx.strokeStyle = 'rgba(112,122,134,0.92)';
+  ctx.lineWidth = Math.max(1, spanPx * 0.13);
+  ctx.beginPath();
+  ctx.moveTo(fj[0], fj[1]);
+  ctx.lineTo(ft[0], ft[1]);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(fj[0], fj[1]);
+  ctx.stroke();
+  // The body: a pale teardrop with the head carried forward, low.
+  ctx.fillStyle = '#f6f1e3';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y, spanPx * 0.17, spanPx * 0.085, tilt, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#d9d4c6';
+  ctx.beginPath();
+  ctx.arc(...pt(spanPx * 0.15, spanPx * 0.02), Math.max(0.7, spanPx * 0.05), 0, Math.PI * 2);
+  ctx.fill();
+  // Near wing: a light inner arm, then the dark tip that catches
+  // the eye — gulls are identified by their wingtips at range.
+  const nj = pt(hx * 0.48, -lift * 0.45);
+  const nt = pt(hx, -lift * 0.9);
+  ctx.strokeStyle = '#e9e4d4';
+  ctx.lineWidth = Math.max(1.1, spanPx * 0.15);
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y);
+  ctx.lineTo(nj[0], nj[1]);
+  ctx.stroke();
+  ctx.strokeStyle = '#333d47';
+  ctx.beginPath();
+  ctx.moveTo(nj[0], nj[1]);
+  ctx.lineTo(nt[0], nt[1]);
+  ctx.stroke();
 }
 
 // --- The built world: bridge, boats, road and falls (v6) ---

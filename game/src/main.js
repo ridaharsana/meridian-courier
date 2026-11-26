@@ -136,7 +136,7 @@ function render(t) {
   }
   drawAircraftShadow(ctx, project, plane);
   if (game.cameraMode === 'cockpit') {
-    drawCockpitFrame(ctx, width, height);
+    drawCockpitFrame(ctx, width, height, plane);
   } else {
     drawChaseAircraft(ctx, plane, width, height, t);
   }

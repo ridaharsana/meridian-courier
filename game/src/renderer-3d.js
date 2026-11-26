@@ -5,7 +5,32 @@
 // coordinates into a picture a pilot can read at a glance.
 
 import { WORLD, PALETTE, RUNWAYS } from './config.js';
-import { groundHeight, surfaceKind, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
+import { groundHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
+
+// The sun's direction, one for the whole world: high, east and a little
+// north — (0.55, 0.78, -0.3) unnormalised. Every slope shade, glitter
+// path and lit wall in this file is computed against it, so the light
+// agrees with itself from the sky down to the harbour rooftops.
+const SUN_DIR = { x: 0.55, y: 0.78, z: -0.3 };
+
+// Scale a #rrggbb colour by a light factor, clamped so shade never
+// crushes to black or blows to white.
+export function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v * f)));
+  const r = c((n >> 16) & 255);
+  const g = c((n >> 8) & 255);
+  const b = c(n & 255);
+  return `rgb(${r},${g},${b})`;
+}
+
+// A cell's deterministic 0..1 hash from its grid coordinates: trees,
+// snow streaks and window lights are planted by it, so the chart is
+// the same on every flight and every screenshot.
+export function cellHash(gx, gz) {
+  const s = Math.sin(gx * 127.1 + gz * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 export function createCamera() {
   return { x: 0, y: 60, z: 0, heading: 0, pitch: 0, roll: 0, fov: 1.05 };
@@ -72,34 +97,52 @@ export function drawSky(ctx, camera, width, height) {
   const horizon = height / 2 - Math.tan(camera.pitch) * height * 0.5;
   const g = ctx.createLinearGradient(0, 0, 0, Math.max(1, horizon));
   g.addColorStop(0, PALETTE.skyTop);
-  g.addColorStop(0.72, PALETTE.skyMid);
+  g.addColorStop(0.45, PALETTE.skyMid);
+  g.addColorStop(0.78, '#bcd9ee');
   g.addColorStop(1, PALETTE.skyLow);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, width, Math.max(0, horizon + 2));
-  // The sun, high off the port bow, and a wash of light under it.
-  ctx.fillStyle = PALETTE.sun;
+  // The sun, high off the port bow: a radial glow that falls off in
+  // rings, a warm wash under it, and a near-white core.
+  const sx = width * 0.82;
+  const sy = height * 0.13;
+  const glow = ctx.createRadialGradient(sx, sy, 4, sx, sy, 120);
+  glow.addColorStop(0, 'rgba(255,246,205,0.55)');
+  glow.addColorStop(0.35, 'rgba(255,240,190,0.22)');
+  glow.addColorStop(1, 'rgba(255,240,190,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(sx - 120, sy - 120, 240, 240);
+  const core = ctx.createRadialGradient(sx - 6, sy - 6, 2, sx, sy, 27);
+  core.addColorStop(0, PALETTE.sunCore);
+  core.addColorStop(0.8, PALETTE.sun);
+  core.addColorStop(1, 'rgba(255,243,196,0.85)');
+  ctx.fillStyle = core;
   ctx.beginPath();
-  ctx.arc(width * 0.82, height * 0.13, 26, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,243,196,0.16)';
-  ctx.beginPath();
-  ctx.arc(width * 0.82, height * 0.13, 58, 0, Math.PI * 2);
+  ctx.arc(sx, sy, 26, 0, Math.PI * 2);
   ctx.fill();
   return horizon;
 }
 
 export function drawSea(ctx, project, camera, width, height, horizon) {
-  ctx.fillStyle = PALETTE.sea;
+  // Open water deepens away from the horizon line; the shallows near a
+  // shore are the terrain shelf's own colour, drawn with the land.
+  const g = ctx.createLinearGradient(0, horizon, 0, height);
+  g.addColorStop(0, '#2b8296');
+  g.addColorStop(0.3, PALETTE.sea);
+  g.addColorStop(1, PALETTE.seaDeep);
+  ctx.fillStyle = g;
   ctx.fillRect(0, horizon, width, height - horizon);
-  // Sun glitter: short bright dashes scattered on the water, denser near
-  // the sun's side — cheap, and it sells the altitude instantly.
-  ctx.fillStyle = 'rgba(220,245,255,0.2)';
-  for (let i = 0; i < 30; i++) {
-    const gx = ((i * 613) % 997) / 997;
+  // Sun glitter: a bright path on the water under the sun, dashes
+  // clustered toward the sun's side of the frame and thinning outward,
+  // plus a sparse scatter elsewhere — it sells the altitude instantly.
+  for (let i = 0; i < 46; i++) {
+    const onPath = i < 32;
+    const gx = onPath ? 0.82 + (((i * 197) % 199) / 199 - 0.5) * 0.36 : ((i * 613) % 997) / 997;
     const gz = 300 + ((i * 389) % 2600);
     const p = project(camera.x + (gx - 0.5) * gz * 1.6, 0, camera.z + gz * 0.4 + (i % 7) * 90);
     if (p && p.x > -20 && p.x < width + 20 && p.y > horizon && p.y < height) {
-      ctx.fillRect(p.x, p.y, Math.max(1.5, p.scale * 6), 1.4);
+      ctx.fillStyle = onPath ? 'rgba(255,246,205,0.4)' : 'rgba(220,245,255,0.18)';
+      ctx.fillRect(p.x, p.y, Math.max(1.5, p.scale * (onPath ? 9 : 6)), 1.4);
     }
   }
 }
@@ -146,7 +189,16 @@ export function drawTerrain(ctx, project, plane) {
     const p4 = project(cell.x, h4, cell.z + s);
     if (!p1 || !p2 || !p3 || !p4) continue;
     const kind = surfaceKind(cell.x + step / 2, cell.z + step / 2, cell.h);
-    ctx.fillStyle = shadeFor(kind, cell.h, cell.x, cell.z);
+    // Slope from the corner heights: the face normal against SUN_DIR
+    // gives one light factor for the whole facet, so hillsides facing
+    // the sun glow and the lee sides sit in honest shade.
+    const dhx = ((h2 + h3) - (h1 + h4)) / (2 * step);
+    const dhz = ((h3 + h4) - (h1 + h2)) / (2 * step);
+    const inv = 1 / Math.hypot(dhx, 1, dhz);
+    const dot = (-dhx * SUN_DIR.x + SUN_DIR.y - dhz * SUN_DIR.z) * inv;
+    const light = 0.62 + 0.55 * Math.max(0, dot);
+    const steep = Math.hypot(dhx, dhz);
+    ctx.fillStyle = shadeFor(kind, cell.h, cell.x, cell.z, light, steep);
     ctx.beginPath();
     ctx.moveTo(p1.x, p1.y);
     ctx.lineTo(p2.x, p2.y);
@@ -154,18 +206,71 @@ export function drawTerrain(ctx, project, plane) {
     ctx.lineTo(p4.x, p4.y);
     ctx.closePath();
     ctx.fill();
+    drawCellTrees(ctx, project, cell, kind, steep);
   }
   ctx.globalAlpha = 1;
 }
 
-function shadeFor(kind, h, x, z) {
+// Trees ride the terrain pass so painter's order keeps them behind
+// nearer hills: a cell grows 0–3 pines by its hash, only on gentle
+// grass — a dark cone with a sun-lit shoulder and a cast shadow fleck.
+function drawCellTrees(ctx, project, cell, kind, steep) {
+  if (kind !== 'grass' || cell.h < 9 || cell.h > 165 || steep > 0.55) return;
+  const step = WORLD.terrainStep;
+  const gx = Math.round(cell.x / step);
+  const gz = Math.round(cell.z / step);
+  const hash = cellHash(gx, gz);
+  if (hash < 0.42) return;
+  const count = hash > 0.86 ? 3 : hash > 0.64 ? 2 : 1;
+  for (let i = 0; i < count; i++) {
+    const tx = cell.x + step * (0.22 + 0.56 * cellHash(gx + i * 7, gz - i * 3));
+    const tz = cell.z + step * (0.2 + 0.58 * cellHash(gx - i * 5, gz + i * 11));
+    const th = groundHeight(tx, tz);
+    if (th < 8) continue;
+    const foot = project(tx, th, tz);
+    const top = project(tx, th + 13, tz);
+    if (!foot || !top) continue;
+    const w = Math.max(1.6, foot.scale * 7.5);
+    const hh = foot.y - top.y;
+    if (hh < 3) continue;
+    ctx.fillStyle = 'rgba(16,40,20,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(foot.x + w * 0.5, foot.y, w * 0.9, w * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = PALETTE.treeDark;
+    ctx.beginPath();
+    ctx.moveTo(foot.x, top.y);
+    ctx.lineTo(foot.x + w, foot.y);
+    ctx.lineTo(foot.x - w, foot.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = PALETTE.treeLight;
+    ctx.beginPath();
+    ctx.moveTo(foot.x, top.y);
+    ctx.lineTo(foot.x + w, foot.y);
+    ctx.lineTo(foot.x + w * 0.18, foot.y);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function shadeFor(kind, h, x, z, light, steep) {
   if (kind === 'runway') return PALETTE.runway;
-  if (h < 0.5) return '#2b8296'; // the shoreline shelf, pale over the sand
-  if (KIND_FILL[kind]) return KIND_FILL[kind];
+  if (h < 0.5) return shade(PALETTE.seaShallow, light); // the shoreline shelf
+  if (kind === 'sand') return shade(h < 2.4 ? PALETTE.sandWet : PALETTE.sand, light);
+  if (kind === 'snow') {
+    // Snowfields break into streaks: the chart noise lays soft blue
+    // shadow runs down the mountain instead of one white slab.
+    const streak = chartNoise(x * 0.7, z * 0.7);
+    return shade(streak > 0.28 ? PALETTE.snowShade : PALETTE.snow, light);
+  }
+  // Steep grass gives up and shows rock, the way real hillsides do.
+  if (steep > 0.62 && h > 42) return shade(steep > 0.95 ? PALETTE.rockDark : PALETTE.rock, light);
+  if (KIND_FILL[kind]) return shade(KIND_FILL[kind], light);
   // Grass takes two tones by height so slopes read as slopes.
   const tone = ((Math.floor(x / 130) + Math.floor(z / 130)) % 2 + 2) % 2;
-  if (h < 60) return tone ? PALETTE.grassLow : '#84b166';
-  return tone ? PALETTE.grassHigh : '#57884a';
+  if (h < 60) return shade(tone ? PALETTE.grassLow : '#84b166', light);
+  return shade(tone ? PALETTE.grassHigh : '#57884a', light);
 }
 
 export function drawRunways(ctx, project) {
@@ -226,6 +331,54 @@ export function drawRunways(ctx, project) {
         }
       }
     }
+    // Solid edge lines, then the piano keys: four threshold bars at
+    // each end, the first thing a pilot's eye hunts on final.
+    ctx.strokeStyle = 'rgba(245,242,230,0.75)';
+    for (const side of [-1, 1]) {
+      const e0 = project(runway.x - fx * hl + px * hw * side, runway.altitude + 0.5, runway.z - fz * hl + pz * hw * side);
+      const e1 = project(runway.x + fx * hl + px * hw * side, runway.altitude + 0.5, runway.z + fz * hl + pz * hw * side);
+      if (e0 && e1) {
+        ctx.lineWidth = Math.max(1, e0.scale * 0.8);
+        ctx.beginPath();
+        ctx.moveTo(e0.x, e0.y);
+        ctx.lineTo(e1.x, e1.y);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = PALETTE.runwayLine;
+    for (const end of [-1, 1]) {
+      for (let bar = 0; bar < 4; bar++) {
+        const off = (bar - 1.5) * (runway.width / 5.2);
+        const a0 = end * (hl - 6);
+        const a1 = end * (hl - 40);
+        const quad = [
+          [runway.x + fx * a0 + px * (off - 2.6), runway.z + fz * a0 + pz * (off - 2.6)],
+          [runway.x + fx * a0 + px * (off + 2.6), runway.z + fz * a0 + pz * (off + 2.6)],
+          [runway.x + fx * a1 + px * (off + 2.6), runway.z + fz * a1 + pz * (off + 2.6)],
+          [runway.x + fx * a1 + px * (off - 2.6), runway.z + fz * a1 + pz * (off - 2.6)],
+        ].map(([x, z]) => project(x, runway.altitude + 0.5, z));
+        if (quad.some((p) => !p)) continue;
+        ctx.beginPath();
+        quad.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    // PAPI lights beside the near threshold: a row of four, white over
+    // red on a true glide — here two and two, the on-slope picture.
+    for (let i = 0; i < 4; i++) {
+      const along = -hl + 52 + i * 9;
+      const p = project(runway.x + fx * along - px * (hw + 7), runway.altitude + 1.2, runway.z + fz * along - pz * (hw + 7));
+      if (!p) continue;
+      ctx.fillStyle = i < 2 ? '#f5f2e6' : PALETTE.lampRed;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(1.4, p.scale * 1.7), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(2.4, p.scale * 3), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
 
@@ -245,9 +398,13 @@ export function drawTown(ctx, project, plane) {
     if (t.some((p) => !p)) continue;
     const b = [corner(-hw, -hd, base), corner(hw, -hd, base), corner(hw, hd, base), corner(-hw, hd, base)];
     if (b.some((p) => !p)) continue;
-    ctx.fillStyle = PALETTE.townWall;
+    // Walls shaded by their facing against SUN_DIR: the two sunward
+    // faces glow cream, the lee faces sit a tone down — the town stops
+    // reading as flat cut-outs and starts reading as streets of houses.
+    const faceLight = [0.86, 1.04, 0.94, 1.12];
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
+      ctx.fillStyle = shade(PALETTE.townWall, faceLight[i]);
       ctx.beginPath();
       ctx.moveTo(b[i].x, b[i].y);
       ctx.lineTo(b[j].x, b[j].y);
@@ -255,12 +412,45 @@ export function drawTown(ctx, project, plane) {
       ctx.lineTo(t[i].x, t[i].y);
       ctx.closePath();
       ctx.fill();
+      // Windows: two rows of lit panes on faces wide enough to carry
+      // them, skipped the moment a house is too far to read.
+      const faceW = Math.hypot(t[j].x - t[i].x, t[j].y - t[i].y);
+      const faceH = Math.hypot(b[i].x - t[i].x, b[i].y - t[i].y);
+      if (faceW > 26 && faceH > 9) {
+        ctx.fillStyle = 'rgba(70,90,110,0.85)';
+        for (const fy of [0.34, 0.68]) {
+          for (const fxn of [0.26, 0.55, 0.8]) {
+            const wx = t[i].x + (t[j].x - t[i].x) * fxn + (b[i].x - t[i].x) * fy;
+            const wy = t[i].y + (t[j].y - t[i].y) * fxn + (b[i].y - t[i].y) * fy;
+            ctx.fillRect(wx - 1.3, wy - 1.6, 2.6, 3.2);
+          }
+        }
+      }
     }
-    ctx.fillStyle = PALETTE.townRoof;
+    // The roof: a raised cap inset from the eaves, sun-lit on top,
+    // with a ridge line running its long axis.
+    const cxT = { x: (t[0].x + t[2].x) / 2, y: (t[0].y + t[2].y) / 2 };
+    const cap = t.map((p) => ({
+      x: cxT.x + (p.x - cxT.x) * 0.82,
+      y: cxT.y + (p.y - cxT.y) * 0.82 - Math.max(1, p.scale * 2.2),
+      scale: p.scale,
+    }));
+    ctx.fillStyle = shade(PALETTE.townRoof, 0.82);
     ctx.beginPath();
     t.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
     ctx.closePath();
     ctx.fill();
+    ctx.fillStyle = shade(PALETTE.townRoof, 1.12);
+    ctx.beginPath();
+    cap.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90,40,20,0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo((cap[0].x + cap[3].x) / 2, (cap[0].y + cap[3].y) / 2);
+    ctx.lineTo((cap[1].x + cap[2].x) / 2, (cap[1].y + cap[2].y) / 2);
+    ctx.stroke();
   }
 }
 
@@ -276,12 +466,18 @@ export function drawLandmarks(ctx, project) {
     const foot = project(mark.x, base, mark.z);
     const head = project(mark.x, base + mark.height, mark.z);
     if (!foot || !head) continue;
-    ctx.strokeStyle = '#e8e4da';
-    ctx.lineWidth = Math.max(1.4, foot.scale * 2.4);
-    ctx.beginPath();
-    ctx.moveTo(foot.x, foot.y);
-    ctx.lineTo(head.x, head.y);
-    ctx.stroke();
+    // The tower wears its daymark: alternating white and red bands up
+    // its height, so it reads as a lighthouse from across the map.
+    for (let band = 0; band < 5; band++) {
+      const f0 = band / 5;
+      const f1 = (band + 1) / 5;
+      ctx.strokeStyle = band % 2 ? '#c8432b' : '#e8e4da';
+      ctx.lineWidth = Math.max(1.4, foot.scale * 2.4);
+      ctx.beginPath();
+      ctx.moveTo(foot.x + (head.x - foot.x) * f0, foot.y + (head.y - foot.y) * f0);
+      ctx.lineTo(foot.x + (head.x - foot.x) * f1, foot.y + (head.y - foot.y) * f1);
+      ctx.stroke();
+    }
     ctx.fillStyle = PALETTE.lampAmber;
     ctx.beginPath();
     ctx.arc(head.x, head.y, Math.max(1.8, foot.scale * 3), 0, Math.PI * 2);
@@ -306,15 +502,29 @@ export function drawRing(ctx, project, ring, isNext, pulse) {
     pts.push(project(wx, ring.y + ly, wz));
   }
   if (pts.some((p) => !p)) return;
+  // A soft halo pass under the hoop, then the hoop itself with a pale
+  // core line — the next gate glows green and reads from a mile out.
+  ctx.strokeStyle = isNext ? 'rgba(61,255,122,0.25)' : 'rgba(255,182,46,0.18)';
+  ctx.lineWidth = Math.max(5, pts[0].scale * 7);
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
   ctx.strokeStyle = isNext ? PALETTE.ringNext : PALETTE.ring;
   ctx.lineWidth = Math.max(2, pts[0].scale * (isNext ? 3.4 + pulse : 2.4));
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = Math.max(1, pts[0].scale * 1.1);
   ctx.beginPath();
   pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
   ctx.stroke();
 }
 
 export function drawClouds(ctx, project, plane, t) {
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  // Each cloud is a cluster of puffs: a soft blue-grey underbelly laid
+  // first, three to five white lobes over it, and one small bright cap
+  // where the sun strikes — volume instead of v1's flat white discs.
   for (let i = 0; i < 14; i++) {
     const cx = plane.x + ((i * 1733) % 5200) - 2600;
     const cz = plane.z + ((i * 1201) % 5200) - 2600;
@@ -322,9 +532,22 @@ export function drawClouds(ctx, project, plane, t) {
     const p = project(cx, cy, cz);
     if (!p) continue;
     const r = Math.max(6, p.scale * 88);
+    const lobes = 3 + (i % 3);
+    ctx.fillStyle = 'rgba(148,172,198,0.5)';
     ctx.beginPath();
-    ctx.ellipse(p.x, p.y, r, r * 0.32, 0, 0, Math.PI * 2);
-    ctx.ellipse(p.x + r * 0.5, p.y + r * 0.08, r * 0.62, r * 0.24, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, p.y + r * 0.16, r * 1.05, r * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    for (let l = 0; l < lobes; l++) {
+      const off = (l / (lobes - 1) - 0.5) * 1.5;
+      const lr = r * (0.62 - Math.abs(off) * 0.22);
+      ctx.beginPath();
+      ctx.ellipse(p.x + off * r, p.y - Math.abs(off) * r * 0.05 + (l % 2) * r * 0.05, lr, lr * 0.52, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,252,240,0.75)';
+    ctx.beginPath();
+    ctx.ellipse(p.x + r * 0.28, p.y - r * 0.16, r * 0.4, r * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 }

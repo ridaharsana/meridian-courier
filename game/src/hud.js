@@ -25,18 +25,23 @@ export function drawHudDigits(ctx, plane, width, height) {
 }
 
 function chip(ctx, x, y, label, value) {
-  ctx.fillStyle = 'rgba(8,12,17,0.78)';
+  const grad = ctx.createLinearGradient(x, y, x, y + 46);
+  grad.addColorStop(0, 'rgba(24,36,50,0.88)');
+  grad.addColorStop(1, 'rgba(8,12,17,0.82)');
+  ctx.fillStyle = grad;
   ctx.fillRect(x, y, 168, 46);
+  ctx.fillStyle = PALETTE.lampAmber;
+  ctx.fillRect(x, y, 168, 2.4);
   ctx.strokeStyle = 'rgba(120,160,190,0.55)';
   ctx.lineWidth = 1.2;
   ctx.strokeRect(x, y, 168, 46);
   ctx.fillStyle = '#8fb0c6';
   ctx.font = '700 10px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(label, x + 84, y + 14);
+  ctx.fillText(label, x + 84, y + 15);
   ctx.fillStyle = PALETTE.ink;
   ctx.font = '700 21px ui-monospace, monospace';
-  ctx.fillText(value, x + 84, y + 38);
+  ctx.fillText(value, x + 84, y + 39);
 }
 
 export function drawMissionBanner(ctx, state, plane, width) {

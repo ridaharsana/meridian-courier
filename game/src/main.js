@@ -10,7 +10,7 @@ import { createCamera, chaseCamera, cockpitCamera, createWorld, syncWorld } from
 import { drawCockpitFrame } from './aircraft-art.js';
 import { drawInstrumentPanel } from './instruments.js';
 import {
-  drawHudDigits, drawMissionBanner, drawCentreMarker, drawEventFlash,
+  drawGradeVignette, drawHudDigits, drawMissionBanner, drawCentreMarker, drawEventFlash,
   drawTitleScreen, drawBriefing, drawSortieEnd,
 } from './hud.js';
 import { createAudio, startAudio, updateAudio, playGateChime, playTouchdownBell, playStallWarning } from './audio.js';
@@ -148,6 +148,8 @@ function render(t, dt) {
   plane.smokeOn = game.smokeOn; // the panel's SMOKE lamp reads the plane
   syncWorld(world, game, camera, juicePool, t, dt);
   ctx.clearRect(0, 0, width, height);
+  // The grade goes down first: it grades the world, never the panel.
+  drawGradeVignette(ctx, width, height);
   if (game.cameraMode === 'cockpit') {
     drawCockpitFrame(ctx, width, height, plane);
   }

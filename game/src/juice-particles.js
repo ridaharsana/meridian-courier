@@ -10,7 +10,7 @@ const KIND_STYLE = [
   { colour: '255,205,92', size: 2.6, drag: 2.4, gravity: -1.2 },
   { colour: '244,248,252', size: 3.4, drag: 1.1, gravity: 0.35 },
   { colour: '219,186,138', size: 4.6, drag: 1.6, gravity: 0.9 },
-  { colour: '248,250,252', size: 6.5, drag: 0.32, gravity: 0.3 },
+  { colour: '248,250,252', size: 7.6, drag: 0.32, gravity: 0.3 },
 ];
 
 export function createParticlePool() {
@@ -117,7 +117,7 @@ export function seedShotJuice(pool, name, plane, ring) {
   if (name === 'cover' && ring) {
     spawnRingBurst(pool, ring.x, ring.y, ring.z, 0.85);
     layTrailBehind(pool, plane, 26);
-    laySmokeBehind(pool, plane, 34);
+    laySmokeBehind(pool, plane, 46);
   } else if (name === 'cargo') {
     layTrailBehind(pool, plane, 22);
     const fx = Math.sin(plane.heading);

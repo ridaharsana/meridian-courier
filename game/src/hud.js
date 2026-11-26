@@ -4,6 +4,31 @@ import { PALETTE, WORLD, CONTROLS_TEXT } from './config.js';
 import { headingDegrees } from './flight-model.js';
 import { objectiveCue } from './missions.js';
 
+// The v15 grade: a photographic vignette and warm wash laid over
+// the 3D frame BEFORE anything else is drawn, so it darkens only
+// the world's corners — every panel, gauge and line of HUD text is
+// painted on top of it and keeps its full contrast. The centre of
+// the frame (where the aeroplane flies) stays untouched.
+export function drawGradeVignette(ctx, width, height) {
+  const cx = width / 2;
+  const cy = height * 0.46;
+  const grad = ctx.createRadialGradient(
+    cx, cy, Math.min(width, height) * 0.52,
+    cx, cy, Math.hypot(width, height) * 0.62,
+  );
+  grad.addColorStop(0, 'rgba(24,14,6,0)');
+  grad.addColorStop(0.72, 'rgba(24,14,6,0.05)');
+  grad.addColorStop(1, 'rgba(24,14,6,0.16)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, width, height);
+  const wash = ctx.createLinearGradient(0, 0, 0, height);
+  wash.addColorStop(0, 'rgba(255,176,92,0.045)');
+  wash.addColorStop(0.5, 'rgba(255,176,92,0)');
+  wash.addColorStop(1, 'rgba(30,40,70,0.03)');
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, width, height);
+}
+
 export function drawHudDigits(ctx, plane, width, height) {
   const feet = Math.max(0, Math.round(plane.y * 3.281));
   const knots = Math.round(plane.speed * 1.944);

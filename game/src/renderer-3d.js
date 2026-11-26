@@ -14,7 +14,9 @@ import { createLifeWorld, updateLifeWorld } from './traffic-and-life.js';
 import { nextRing } from './missions.js';
 import { PARTICLE_KINDS } from './juice-particles.js';
 
-export const SUN_DIR = { x: 0.66, y: 0.34, z: -0.38 };
+// v15: the sun sits lower than it did (about 17 degrees up, not 24),
+// so the evening shadows stretch and the slopes model themselves.
+export const SUN_DIR = { x: 0.68, y: 0.24, z: -0.39 };
 const SUN_LEN = Math.hypot(SUN_DIR.x, SUN_DIR.y, SUN_DIR.z);
 const SUN = new THREE.Vector3(SUN_DIR.x / SUN_LEN, SUN_DIR.y / SUN_LEN, SUN_DIR.z / SUN_LEN);
 const HAZE = new THREE.Color(PALETTE.haze);
@@ -73,6 +75,75 @@ export function makeNoiseTexture(size = 256, base = 235, spread = 42) {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A cloud puff with its lighting baked in (v15): overlapping blobs
+// drawn twice over — a warm-grey shaded belly low and wide, then
+// bright sunlit crowns above it — so a flat sprite still reads as a
+// lit volume instead of a white smear.
+export function makeCloudTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  const rng = makeRng(777);
+  const blob = (x, y, r, inner, outer) => {
+    const grad = g.createRadialGradient(x, y, r * 0.1, x, y, r);
+    grad.addColorStop(0, inner);
+    grad.addColorStop(1, outer);
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  for (let i = 0; i < 9; i++) {
+    const x = 52 + rng() * 152;
+    const y = 66 + rng() * 22;
+    const r = 30 + rng() * 30;
+    blob(x, y, r, 'rgba(186,164,142,0.20)', 'rgba(186,164,142,0)');
+  }
+  for (let i = 0; i < 11; i++) {
+    const x = 46 + rng() * 164;
+    const y = 38 + rng() * 30;
+    const r = 24 + rng() * 30;
+    blob(x, y, r, 'rgba(255,250,238,0.30)', 'rgba(255,250,238,0)');
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// A smoke puff with a body (v15): several overlapping blobs build an
+// opaque-ish core with an irregular rim, then a destination-out
+// radial pass eats the square canvas edge away so no two puffs share
+// the same silhouette. Replaces the plain radial glow, which read
+// as bokeh dots.
+export function makePuffTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  const rng = makeRng(31337);
+  const blob = (x, y, r, a) => {
+    const grad = g.createRadialGradient(x, y, r * 0.08, x, y, r);
+    grad.addColorStop(0, `rgba(255,253,249,${a})`);
+    grad.addColorStop(1, 'rgba(255,253,249,0)');
+    g.fillStyle = grad;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  for (let i = 0; i < 10; i++) {
+    const a = rng() * Math.PI * 2;
+    const d = rng() * 26;
+    blob(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, 17 + rng() * 15, 0.34);
+  }
+  blob(64, 64, 30, 0.5);
+  blob(58, 58, 20, 0.45);
+  g.globalCompositeOperation = 'destination-out';
+  const cut = g.createRadialGradient(64, 64, 40, 64, 64, 63);
+  cut.addColorStop(0, 'rgba(0,0,0,0)');
+  cut.addColorStop(1, 'rgba(0,0,0,1)');
+  g.fillStyle = cut;
+  g.fillRect(0, 0, 128, 128);
+  g.globalCompositeOperation = 'source-over';
+  const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -222,6 +293,11 @@ function biomeColour(x, z, h, slope, out) {
   return grass;
 }
 
+// The two ends of the v15 baked-light grade: slopes the low sun
+// faces take a warm kiss, slopes turned away fall cool.
+const SUN_WARM = new THREE.Color('#ffbe78');
+const SHADE_COOL = new THREE.Color('#5f7ca6');
+
 export function buildTerrainMesh(detailTex) {
   const SEG = 190;
   const geo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, SEG, SEG);
@@ -244,6 +320,25 @@ export function buildTerrainMesh(detailTex) {
     const h = pos.getY(i);
     const slope = 1 - normals.getY(i);
     biomeColour(x, z, h, slope, tmp);
+    // Baked light (v15). The directional sun alone leaves the smooth
+    // island domes reading flat, so two cheap terms are folded into
+    // the vertex colour: a fake ambient occlusion — ground whose
+    // neighbours stand higher than it sits in a hollow and darkens —
+    // and a sun-facing grade from the vertex normal, warm on the lit
+    // side, cool on the turned side. Land only: the sea floor keeps
+    // its chart colours, and the runway plateaus stay clean because
+    // their relief (and so their AO term) is already zero.
+    if (h > 0.4) {
+      const around = (visualHeight(x + 34, z) + visualHeight(x - 34, z)
+        + visualHeight(x, z + 34) + visualHeight(x, z - 34)) / 4;
+      const hollow = Math.max(0, around - h);
+      const ao = (1 - Math.min(0.32, hollow * 0.011)) * (0.95 + 0.05 * Math.min(1, h / 120));
+      const sunFace = normals.getX(i) * SUN.x + normals.getY(i) * SUN.y + normals.getZ(i) * SUN.z;
+      const lit = Math.max(0, sunFace);
+      tmp.multiplyScalar((0.84 + 0.28 * lit) * ao);
+      tmp.lerp(SUN_WARM, lit * lit * 0.15);
+      tmp.lerp(SHADE_COOL, Math.max(0, -sunFace) * 0.10 + (1 - lit) * 0.03);
+    }
     colours[i * 3] = tmp.r; colours[i * 3 + 1] = tmp.g; colours[i * 3 + 2] = tmp.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
@@ -261,8 +356,8 @@ export function buildWaterMesh(bumpTex) {
   const geo = new THREE.CircleGeometry(11000, 48);
   geo.rotateX(-Math.PI / 2);
   const mat = new THREE.MeshStandardMaterial({
-    color: hexColor(PALETTE.sea), roughness: 0.14, metalness: 0.05,
-    bumpMap: bumpTex, bumpScale: 0.9, envMapIntensity: 1.15,
+    color: hexColor(PALETTE.sea), roughness: 0.11, metalness: 0.05,
+    bumpMap: bumpTex, bumpScale: 0.9, envMapIntensity: 1.45,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(TERRAIN_CENTRE.x, 0, TERRAIN_CENTRE.z);
@@ -720,6 +815,11 @@ export function buildRings(group) {
   return rings;
 }
 
+// The next-ring green, deepened for the grade (v15): the palette's
+// mint at high emissive intensity blows out to near-white under
+// ACES, so the hoop itself burns a richer green and stays a colour.
+const NEXT_GREEN = '#17d95e';
+
 export function updateRings(rings, state, t) {
   const upcoming = nextRing(state);
   const pulse = (t * 0.65) % 1;
@@ -735,15 +835,17 @@ export function updateRings(rings, state, t) {
     slot.mesh.position.set(ring.x, ring.y, ring.z);
     slot.mesh.rotation.y = Math.PI - (ring.heading * Math.PI) / 180;
     const isNext = ring === upcoming;
-    slot.mesh.material.emissive.set(isNext ? PALETTE.ringNext : PALETTE.ring);
-    slot.mesh.material.emissiveIntensity = isNext ? 1.5 + Math.sin(t * 5) * 0.35 : 0.5;
+    slot.mesh.material.emissive.set(isNext ? NEXT_GREEN : PALETTE.ring);
+    // v15: driven harder, in the deeper green — saturation survives.
+    slot.mesh.material.emissiveIntensity = isNext ? 2.1 + Math.sin(t * 5) * 0.35 : 0.7;
+    if (isNext) slot.echo.material.color.set(NEXT_GREEN);
     slot.echo.visible = isNext;
     if (isNext) {
       slot.echo.position.copy(slot.mesh.position);
       slot.echo.rotation.copy(slot.mesh.rotation);
       const s = 1 + pulse * 0.4;
       slot.echo.scale.setScalar(s);
-      slot.echo.material.opacity = (1 - pulse) * 0.55;
+      slot.echo.material.opacity = (1 - pulse) * 0.72;
     }
   });
   for (let i = state.mission.rings.length; i < rings.length; i++) {
@@ -754,15 +856,15 @@ export function updateRings(rings, state, t) {
 
 const MAX_POINTS = 512;
 
-export function buildJuicePoints(group, glowTex) {
-  const makeSystem = (size, blending, opacity) => {
+export function buildJuicePoints(group, glowTex, puffTex) {
+  const makeSystem = (size, blending, opacity, map = glowTex) => {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(MAX_POINTS * 3).fill(-9999);
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.PointsMaterial({
       size, sizeAttenuation: true, transparent: true, opacity,
       blending, depthWrite: false, color: 0xffffff, vertexColors: true,
-      map: glowTex, alphaTest: 0.01,
+      map, alphaTest: 0.01,
     });
     const colours = new Float32Array(MAX_POINTS * 3);
     geo.setAttribute('color', new THREE.BufferAttribute(colours, 3).setUsage(THREE.DynamicDrawUsage));
@@ -775,8 +877,10 @@ export function buildJuicePoints(group, glowTex) {
   sparks.points.material.color.set(0xffcd5c);
   const soft = makeSystem(0.55, THREE.NormalBlending, 0.3);
   // Smoke gets its own system: the puffs are metres wide, not
-  // centimetres, and a point sprite's size is per-system.
-  const smoke = makeSystem(3.4, THREE.NormalBlending, 0.45);
+  // centimetres, and a point sprite's size is per-system. v15: it
+  // wears the dense puff texture (not the radial glow) and runs a
+  // touch larger and more opaque, so the ribbon reads as smoke.
+  const smoke = makeSystem(4.1, THREE.NormalBlending, 0.52, puffTex);
   return { sparks, soft, smoke };
 }
 
@@ -821,11 +925,14 @@ export function updateJuicePoints(systems, pool) {
 // ------------------------------------------------------------------
 // Clouds: soft sprites drifting over the chart.
 
-export function buildClouds(group, glowTex) {
+export function buildClouds(group) {
   const rng = makeRng(1357);
   const clouds = [];
+  // v15: the puffs wear the two-tone cloud texture — lit crowns over
+  // a shaded warm belly — and fly a size larger and softer than the
+  // old radial-glow smears.
   const mat = new THREE.SpriteMaterial({
-    map: glowTex, color: 0xfff4e0, transparent: true, opacity: 0.42, depthWrite: false, fog: false,
+    map: makeCloudTexture(), color: 0xfff4e0, transparent: true, opacity: 0.55, depthWrite: false, fog: false,
   });
   for (let i = 0; i < 34; i++) {
     const cluster = new THREE.Group();
@@ -833,7 +940,7 @@ export function buildClouds(group, glowTex) {
     for (let p = 0; p < puffs; p++) {
       const puff = new THREE.Sprite(mat);
       puff.position.set((rng() - 0.5) * 260, (rng() - 0.5) * 36, (rng() - 0.5) * 120);
-      puff.scale.set(300 + rng() * 320, 90 + rng() * 80, 1);
+      puff.scale.set(350 + rng() * 370, 105 + rng() * 95, 1);
       cluster.add(puff);
     }
     cluster.position.set(-3800 + rng() * 8400, 330 + rng() * 260, -3800 + rng() * 8400);
@@ -849,14 +956,18 @@ export function buildClouds(group, glowTex) {
 export function createWorld(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.06;
+  renderer.toneMappingExposure = 1.1;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(1);
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(HAZE.clone(), 900, 7200);
+  // v15 fog: the haze is pulled toward the sky's horizon band and
+  // the far plane pushed out, so the sea melts into the sky instead
+  // of cutting against it at a hard line.
+  const fogColour = HAZE.clone().lerp(new THREE.Color(PALETTE.skyLow), 0.38);
+  scene.fog = new THREE.Fog(fogColour, 1050, 8600);
 
   const camera3 = new THREE.PerspectiveCamera(60, 1280 / 800, 0.5, 24000);
 
@@ -869,14 +980,23 @@ export function createWorld(canvas) {
   scene.add(dome);
   world.dome = dome;
 
-  const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: makeGlowTexture('rgba(255,226,170,1)', 'rgba(255,190,110,0)'),
-    color: 0xffe2aa, transparent: true, opacity: 0.95,
-    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-  }));
-  sunSprite.scale.setScalar(1150);
-  scene.add(sunSprite);
-  world.sunSprite = sunSprite;
+  // The sun as three nested glows (v15): a small hot core, an amber
+  // mid halo and a wide faint outer wash. The old single sprite read
+  // as a pale moon; layered, the disc has a centre that burns.
+  const sunGroup = new THREE.Group();
+  const sunLayer = (inner, outer, scale, opacity) => {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeGlowTexture(inner, outer), color: 0xffffff, transparent: true, opacity,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    }));
+    s.scale.setScalar(scale);
+    sunGroup.add(s);
+  };
+  sunLayer('rgba(255,196,110,1)', 'rgba(255,170,80,0)', 2400, 0.26);
+  sunLayer('rgba(255,202,118,1)', 'rgba(255,178,92,0)', 860, 0.62);
+  sunLayer('rgba(255,240,203,1)', 'rgba(255,232,178,0)', 350, 0.98);
+  scene.add(sunGroup);
+  world.sunSprite = sunGroup;
 
   const hemi = new THREE.HemisphereLight(0xbdd3f2, 0x8a7a56, 0.85);
   scene.add(hemi);
@@ -895,7 +1015,9 @@ export function createWorld(canvas) {
   scene.add(sun.target);
   world.sun = sun;
 
-  const detailTex = makeNoiseTexture(256, 238, 40);
+  // v15: the grain runs at nearly double the old contrast, so the
+  // ground's speckle survives the flight to the horizon.
+  const detailTex = makeNoiseTexture(256, 244, 76);
   detailTex.repeat.set(210, 210);
   const terrain = buildTerrainMesh(detailTex);
   scene.add(terrain);
@@ -903,6 +1025,7 @@ export function createWorld(canvas) {
   bumpTex.repeat.set(300, 300);
   const water = buildWaterMesh(bumpTex);
   scene.add(water);
+  world.waterBump = bumpTex;
 
   const dressing = new THREE.Group();
   scene.add(dressing);
@@ -917,8 +1040,12 @@ export function createWorld(canvas) {
   buildLighthouses(dressing, makeGlowTexture('rgba(255,215,150,1)', 'rgba(255,190,110,0)'));
   world.boats = buildBoats(dressing);
   world.rings = buildRings(dressing);
-  world.clouds = buildClouds(dressing, makeGlowTexture('rgba(255,248,235,1)', 'rgba(255,248,235,0)'));
-  world.juice = buildJuicePoints(dressing, makeGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'));
+  world.clouds = buildClouds(dressing);
+  world.juice = buildJuicePoints(
+    dressing,
+    makeGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'),
+    makePuffTexture(),
+  );
 
   world.petrel = buildPetrelAircraft();
   scene.add(world.petrel.group);
@@ -971,6 +1098,13 @@ export function syncWorld(world, game, cameraState, pool, t, dt) {
   world.sunSprite.position.copy(_pos).addScaledVector(SUN, 9800);
   world.sun.position.copy(_pos).addScaledVector(SUN, 900);
   world.sun.target.position.set(plane.x, plane.y, plane.z);
+
+  // The water breathes (v15): the bump field crawls slowly across
+  // the surface, so the glitter lane shimmers instead of sitting
+  // printed on a still pond.
+  if (world.waterBump) {
+    world.waterBump.offset.set((t * 0.006) % 1, (t * 0.0041) % 1);
+  }
 
   updatePetrelAircraft(world.petrel, plane, t);
   world.petrel.group.visible = game.cameraMode !== 'cockpit';

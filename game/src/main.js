@@ -10,7 +10,7 @@ import { updateMission, nextRing } from './missions.js';
 import {
   createCamera, chaseCamera, cockpitCamera, makeProjector,
   drawSky, drawSea, drawTerrain, drawRunways, drawTown, drawLandmarks, drawRing, drawClouds,
-  drawBridge, drawBoats, drawHarbourRoad,
+  drawBridge, drawBoats, drawPier, drawHarbourRoad,
 } from './renderer-3d.js';
 import { drawChaseAircraft, drawCockpitFrame, drawAircraftShadow } from './aircraft-art.js';
 import { drawInstrumentPanel } from './instruments.js';
@@ -134,7 +134,8 @@ function render(t) {
   // place. (A Vela waterfall was tried and cut in QA: at screenshot
   // range it read as a scratch on the slope, not as water.)
   drawBridge(ctx, project);
-  drawBoats(ctx, project);
+  drawPier(ctx, project);
+  drawBoats(ctx, project, t);
   drawHarbourRoad(ctx, project);
   // Mission rings, the next one pulsing green.
   const upcoming = nextRing(game.missionState);

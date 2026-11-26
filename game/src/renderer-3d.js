@@ -1587,88 +1587,321 @@ export function drawBridge(ctx, project) {
   }
 }
 
-// Working boats: a ferry crossing for Porto Lume, a sailboat beating
-// up the strait in the cover's view, and a fishing boat off the
-// harbour mouth. Hull, cabin and a wake that fans out astern — at
-// golden hour the sails and the wake do the talking.
-const BOATS = [
-  { x: 2050, z: 1650, heading: 55, len: 26, sail: false, name: 'lume ferry' },
-  { x: 1050, z: 800, heading: 150, len: 13, sail: true, name: 'strait sailboat' },
-  { x: 2620, z: 2820, heading: 205, len: 15, sail: false, name: 'harbour fishing boat' },
+// Working boats (v8): the sea is a workplace now, not a backdrop.
+// v6 floated three boats and in stills they read as specks — a boat
+// only reads as a boat at screenshot range if it carries a tall
+// silhouette (a sail, a wheelhouse, a funnel) and a wake long enough
+// to draw the eye. So the fleet runs to thirteen: nine vessels
+// working lanes — a coaster and the Lume ferry crossing the bay the
+// cargo camera flies over, sailboats beating the strait in the
+// cover's view, fishing boats on the coastal runs — and four more
+// moored alongside the two jetties, masts up, riding the bob. Every
+// lane below was sounded against the chart (deepest keel clearance
+// −2.8 m) so no hull ever crosses a shore, and the showcase lanes
+// were phased so their boats sit mid-frame in the first seconds of
+// a flight — the seconds the screenshot scenes live in.
+const BOAT_LANES = [
+  { kind: 'coaster', len: 36, ax: 2030, az: 1420, bx: 2280, bz: 1510, speed: 3.2, phase: 0.35, name: 'bay coaster' },
+  { kind: 'ferry', len: 26, ax: 1920, az: 1180, bx: 2080, bz: 1520, speed: 3.8, phase: 0.54, name: 'lume ferry' },
+  { kind: 'fishing', len: 14, ax: 2240, az: 1300, bx: 2140, bz: 1500, speed: 2.6, phase: 0.32, hull: '#7a3b2a', name: 'bay fishing boat' },
+  { kind: 'sail', len: 16, ax: 640, az: 660, bx: 1060, bz: 1000, speed: 2.2, phase: 0.31, heel: 1, name: 'strait sailboat' },
+  { kind: 'sail', len: 15, ax: 1300, az: 1200, bx: 1650, bz: 1020, speed: 2.4, phase: 0.28, heel: -1, name: 'east bay sailboat' },
+  { kind: 'fishing', len: 14, ax: 820, az: 880, bx: 1010, bz: 1080, speed: 2.0, phase: 0.45, hull: '#2e5f5a', name: 'strait fishing boat' },
+  { kind: 'fishing', len: 14, ax: 2350, az: 3260, bx: 2750, bz: 3180, speed: 2.4, phase: 0.20, hull: '#31435c', name: 'south fishing boat' },
+  { kind: 'sail', len: 15, ax: -500, az: 2750, bx: 300, bz: 2950, speed: 2.6, phase: 0.50, heel: 1, name: 'home shore sailboat' },
+  { kind: 'fishing', len: 14, ax: -1500, az: 300, bx: -1150, bz: 620, speed: 2.2, phase: 0.40, hull: '#7a3b2a', name: 'cay fishing boat' },
 ];
 
-export function drawBoats(ctx, project) {
-  for (const boat of BOATS) {
-    const rad = (boat.heading * Math.PI) / 180;
-    const fx = Math.sin(rad);
-    const fz = -Math.cos(rad);
-    const px = fz;
-    const pz = -fx;
-    const L = boat.len;
-    const Wd = L * 0.3;
-    const at = (along, across, y) => [
-      boat.x + fx * along + px * across, y, boat.z + fz * along + pz * across,
-    ];
-    // The wake first, under everything: a pale fan astern that
-    // widens and fades as it trails.
+// Tied up and going nowhere: two at Porto Lume's jetty, one more
+// beside it, and one at the Pilot Islet jetty under the bridge.
+const MOORED_BOATS = [
+  { kind: 'fishing', len: 13, x: 2599, z: 3150, heading: 4, hull: '#2e5f5a', phase: 0.0, name: 'moored fishing boat' },
+  { kind: 'sail', len: 14, x: 2643, z: 3180, heading: -6, phase: 1.7, name: 'moored sailboat' },
+  { kind: 'fishing', len: 11, x: 2599, z: 3088, heading: 0, hull: '#7a3b2a', phase: 3.4, name: 'moored harbour boat' },
+  { kind: 'fishing', len: 12, x: 1229, z: 495, heading: 90, hull: '#31435c', phase: 2.6, name: 'islet moored boat' },
+];
+
+// A lane boat's pose at time t: it runs its segment, turns at the
+// end and runs back — a working boat, not a train on a loop.
+function boatPose(lane, t) {
+  const dx = lane.bx - lane.ax;
+  const dz = lane.bz - lane.az;
+  const len = Math.hypot(dx, dz);
+  const u = lane.phase + (t * lane.speed) / len;
+  const cyc = ((u % 2) + 2) % 2;
+  const tri = cyc < 1 ? cyc : 2 - cyc;
+  const dir = cyc < 1 ? 1 : -1;
+  const fx = (dx / len) * dir;
+  const fz = (dz / len) * dir;
+  return {
+    x: lane.ax + dx * tri,
+    z: lane.az + dz * tri,
+    heading: (Math.atan2(fx, -fz) * 180) / Math.PI,
+    moving: true,
+  };
+}
+
+// Mix two hex colours — the painter's shortcut for shading a hull
+// side by however much sun its normal actually catches.
+function mixHex(a, b, f) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.substr(i, 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.substr(i, 2), 16));
+  const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * f));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+// One boat, whole: wake (if she is moving), hull shaded side by
+// side against SUN_DIR, then whatever she carries — sails, a cabin,
+// a wheelhouse, hatch covers and a funnel. `pose` is {x, z,
+// heading} plus, for moored boats, a bob phase instead of a wake.
+function drawBoat(ctx, project, boat, pose, t) {
+  const rad = (pose.heading * Math.PI) / 180;
+  const fx = Math.sin(rad);
+  const fz = -Math.cos(rad);
+  const px = fz; // starboard axis
+  const pz = -fx;
+  const L = boat.len;
+  const Wd = L * (boat.kind === 'coaster' ? 0.26 : 0.3);
+  const bob = pose.moving ? 0 : Math.sin(t * 0.8 + (boat.phase || 0)) * 0.12;
+  const at = (along, across, y) => [
+    pose.x + fx * along + px * across, y + bob, pose.z + fz * along + pz * across,
+  ];
+  // How much sun each flank catches, from SUN_DIR's bearing: the
+  // lit side of every hull in the fleet agrees with the terrain.
+  const sunH = Math.hypot(SUN_DIR.x, SUN_DIR.z) || 1;
+  const litPlus = 0.5 + 0.5 * ((px * SUN_DIR.x + pz * SUN_DIR.z) / sunH);
+  const hullBase = boat.hull || (boat.kind === 'coaster' ? '#3d4a56' : '#7a3b2a');
+  const wallPlus = mixHex(hullBase, '#e8b07a', litPlus * 0.45);
+  const wallMinus = mixHex(hullBase, '#10151c', (1 - litPlus) * 0.45);
+  const freeboard = boat.kind === 'coaster' ? 3.4
+    : boat.kind === 'ferry' ? 2.6 : boat.kind === 'sail' ? 1.7 : 1.9;
+
+  if (pose.moving) {
+    // The wake: a pale fan astern that widens and fades as it
+    // trails, a brighter churn at its heart, and a bow wave tick
+    // at each shoulder so the direction of travel reads at range.
+    const trail = L * (boat.kind === 'coaster' ? 4.2 : 3.0);
     featureQuad(ctx, project, [
-      at(-L * 0.5, -Wd * 0.32, 0.25), at(-L * 0.5, Wd * 0.32, 0.25),
-      at(-L * 2.8, Wd * 1.5, 0.25), at(-L * 2.8, -Wd * 1.5, 0.25),
+      at(-L * 0.5, -Wd * 0.34, 0.25), at(-L * 0.5, Wd * 0.34, 0.25),
+      at(-trail, Wd * 1.6, 0.25), at(-trail, -Wd * 1.6, 0.25),
     ], 'rgba(238,248,250,0.2)');
     featureQuad(ctx, project, [
-      at(-L * 0.5, -Wd * 0.1, 0.28), at(-L * 0.5, Wd * 0.1, 0.28),
-      at(-L * 2.2, Wd * 0.42, 0.28), at(-L * 2.2, -Wd * 0.42, 0.28),
-    ], 'rgba(250,253,255,0.32)');
-    // Hull: a sun-side wall, a shade-side wall and the deck between.
+      at(-L * 0.5, -Wd * 0.12, 0.28), at(-L * 0.5, Wd * 0.12, 0.28),
+      at(-trail * 0.72, Wd * 0.45, 0.28), at(-trail * 0.72, -Wd * 0.45, 0.28),
+    ], 'rgba(250,253,255,0.34)');
+    for (const s of [-1, 1]) {
+      featureQuad(ctx, project, [
+        at(L * 0.34, s * Wd * 0.42, 0.26), at(L * 0.52, 0, 0.26),
+        at(L * 0.1, s * Wd * 0.95, 0.26), at(L * 0.1, s * Wd * 0.95, 0.26),
+      ], 'rgba(250,253,255,0.28)');
+    }
+  } else {
+    // Moored: no wake — a soft shadow-raft on the water instead.
     featureQuad(ctx, project, [
-      at(-L * 0.5, -Wd / 2, 1.7), at(L * 0.32, -Wd / 2, 1.7),
-      at(L * 0.52, 0, 1.15), at(-L * 0.5, -Wd * 0.2, 0.4),
-    ], '#7a3b2a');
+      at(-L * 0.58, -Wd * 0.75, 0.18), at(-L * 0.58, Wd * 0.75, 0.18),
+      at(L * 0.45, Wd * 0.6, 0.18), at(L * 0.45, -Wd * 0.6, 0.18),
+    ], 'rgba(18,38,48,0.22)');
+  }
+
+  // Hull: two shaded walls meeting at the bow, the deck between.
+  featureQuad(ctx, project, [
+    at(-L * 0.5, -Wd / 2, freeboard), at(L * 0.32, -Wd / 2, freeboard),
+    at(L * 0.52, 0, freeboard * 0.68), at(-L * 0.5, -Wd * 0.2, 0.4),
+  ], wallMinus);
+  featureQuad(ctx, project, [
+    at(-L * 0.5, Wd / 2, freeboard), at(L * 0.32, Wd / 2, freeboard),
+    at(L * 0.52, 0, freeboard * 0.68), at(-L * 0.5, Wd * 0.2, 0.4),
+  ], wallPlus);
+  featureQuad(ctx, project, [
+    at(-L * 0.5, -Wd / 2, freeboard), at(-L * 0.5, Wd / 2, freeboard),
+    at(L * 0.32, Wd / 2, freeboard), at(L * 0.32, -Wd / 2, freeboard),
+  ], boat.kind === 'coaster' ? '#8b8d84' : '#e8e2d2');
+
+  // A box in boat-local space — wheelhouses, cabins, hatch covers
+  // and crates are all this one brick at different addresses. Its
+  // two visible walls take the hull's sun split, its top the sky.
+  const box = (a0, a1, halfAcross, y0, y1, top, lit, shade) => {
     featureQuad(ctx, project, [
-      at(-L * 0.5, Wd / 2, 1.7), at(L * 0.32, Wd / 2, 1.7),
-      at(L * 0.52, 0, 1.15), at(-L * 0.5, Wd * 0.2, 0.4),
-    ], '#93502f');
+      at(a0, -halfAcross, y1), at(a0, halfAcross, y1),
+      at(a1, halfAcross, y1), at(a1, -halfAcross, y1),
+    ], top);
     featureQuad(ctx, project, [
-      at(-L * 0.5, -Wd / 2, 1.7), at(-L * 0.5, Wd / 2, 1.7),
-      at(L * 0.32, Wd / 2, 1.7), at(L * 0.32, -Wd / 2, 1.7),
-    ], '#e8e2d2');
-    if (boat.sail) {
-      // Mast and two sails, cream canvas lit warm — a triangle you
-      // can read from across the strait.
-      const mastTop = at(L * 0.05, 0, L * 1.15);
-      const mastFoot = at(L * 0.05, 0, 1.7);
-      const boomEnd = at(-L * 0.42, 0, 2.4);
-      const jibFoot = at(L * 0.46, 0, 1.9);
+      at(a0, halfAcross, y1), at(a0, halfAcross, y0),
+      at(a1, halfAcross, y0), at(a1, halfAcross, y1),
+    ], lit);
+    featureQuad(ctx, project, [
+      at(a0, -halfAcross, y1), at(a0, -halfAcross, y0),
+      at(a1, -halfAcross, y0), at(a1, -halfAcross, y1),
+    ], shade);
+  };
+  const cabLit = mixHex('#eef0ea', '#ffd9a0', litPlus * 0.4);
+  const cabShade = mixHex('#c9cdc2', '#4a5058', (1 - litPlus) * 0.4);
+
+  if (boat.kind === 'sail') {
+    // Mast and two sails, cream canvas lit warm, heeled away from
+    // the wind: the top of the rig leans across by a shear that
+    // grows with height, so the whole triangle tips as one cloth.
+    const heel = (boat.heel || 1) * 0.16;
+    const lean = (y) => heel * Math.max(0, y - freeboard);
+    const mastTop = at(L * 0.05, lean(L * 1.12), L * 1.12);
+    const mastFoot = at(L * 0.05, 0, freeboard);
+    const boomEnd = at(-L * 0.42, lean(2.4), 2.4);
+    const jibFoot = at(L * 0.46, lean(1.9), 1.9);
+    if (pose.moving) {
       featureQuad(ctx, project, [mastTop, mastFoot, boomEnd, boomEnd], '#fdf6e0');
       featureQuad(ctx, project, [mastTop, mastFoot, jibFoot, jibFoot], '#f3e8cc');
-      const mp = [mastFoot, mastTop].map(([x, y, z]) => project(x, y, z));
-      if (!mp.some((p) => !p)) {
-        ctx.strokeStyle = '#4c3d28';
-        ctx.lineWidth = Math.max(1, mp[0].scale * 0.35);
-        ctx.beginPath();
-        ctx.moveTo(mp[0].x, mp[0].y);
-        ctx.lineTo(mp[1].x, mp[1].y);
-        ctx.stroke();
-      }
     } else {
-      // Wheelhouse: a white block with a dark window band and a
-      // warm lamp on its roof.
+      // Furled: the sail sleeps as a slim bundle along the boom.
       featureQuad(ctx, project, [
-        at(-L * 0.28, -Wd * 0.3, 4.6), at(-L * 0.28, Wd * 0.3, 4.6),
-        at(L * 0.08, Wd * 0.3, 4.6), at(L * 0.08, -Wd * 0.3, 4.6),
-      ], '#eef0ea');
+        at(L * 0.03, 0, freeboard + 0.85), at(-L * 0.42, 0, freeboard + 0.85),
+        at(-L * 0.42, 0, freeboard + 0.3), at(L * 0.03, 0, freeboard + 0.3),
+      ], '#e6dcc2');
+    }
+    const mp = [mastFoot, mastTop].map(([x, y, z]) => project(x, y, z));
+    if (!mp.some((p) => !p)) {
+      ctx.strokeStyle = '#4c3d28';
+      ctx.lineWidth = Math.max(1, mp[0].scale * 0.35);
+      ctx.beginPath();
+      ctx.moveTo(mp[0].x, mp[0].y);
+      ctx.lineTo(mp[1].x, mp[1].y);
+      ctx.stroke();
+    }
+  } else if (boat.kind === 'ferry') {
+    // A long white passenger cabin with a dark window band running
+    // its length, a bridge block on top and a lamp for the evening.
+    box(-L * 0.38, L * 0.22, Wd * 0.36, freeboard, freeboard + 2.6, '#f4f2ea', cabLit, cabShade);
+    for (const s of [-1, 1]) {
       featureQuad(ctx, project, [
-        at(-L * 0.28, Wd * 0.3, 4.6), at(-L * 0.28, Wd * 0.3, 2.1),
-        at(L * 0.08, Wd * 0.3, 2.1), at(L * 0.08, Wd * 0.3, 4.6),
-      ], '#dfe3da');
-      featureQuad(ctx, project, [
-        at(-L * 0.28, -Wd * 0.3, 4.6), at(-L * 0.28, -Wd * 0.3, 2.1),
-        at(L * 0.08, -Wd * 0.3, 2.1), at(L * 0.08, -Wd * 0.3, 4.6),
-      ], '#c9cdc2');
-      featureQuad(ctx, project, [
-        at(-L * 0.26, Wd * 0.31, 4.1), at(-L * 0.26, Wd * 0.31, 3.3),
-        at(L * 0.06, Wd * 0.31, 3.3), at(L * 0.06, Wd * 0.31, 4.1),
+        at(-L * 0.36, s * Wd * 0.37, freeboard + 2.15), at(-L * 0.36, s * Wd * 0.37, freeboard + 1.45),
+        at(L * 0.2, s * Wd * 0.37, freeboard + 1.45), at(L * 0.2, s * Wd * 0.37, freeboard + 2.15),
       ], 'rgba(38,52,66,0.9)');
+    }
+    box(-L * 0.05, L * 0.16, Wd * 0.24, freeboard + 2.6, freeboard + 4.1, '#eef0ea', cabLit, cabShade);
+    const lamp = project(...at(0.05 * L, 0, freeboard + 4.6));
+    if (lamp) {
+      ctx.fillStyle = PALETTE.lampAmber;
+      ctx.beginPath();
+      ctx.arc(lamp.x, lamp.y, Math.max(1.1, lamp.scale * 1.1), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (boat.kind === 'coaster') {
+    // Hatch covers amidships, a white castle aft with its funnel,
+    // and a fore post — a working ship's unmistakable profile.
+    box(L * 0.04, L * 0.2, Wd * 0.38, freeboard, freeboard + 1.1, '#9a6a44', '#8a5f3c', '#6e4a2e');
+    box(L * 0.26, L * 0.42, Wd * 0.38, freeboard, freeboard + 1.1, '#9a6a44', '#8a5f3c', '#6e4a2e');
+    box(-L * 0.47, -L * 0.25, Wd * 0.34, freeboard, freeboard + 5.4, '#eef0ea', cabLit, cabShade);
+    featureQuad(ctx, project, [
+      at(-L * 0.46, Wd * 0.35, freeboard + 4.6), at(-L * 0.46, Wd * 0.35, freeboard + 3.9),
+      at(-L * 0.26, Wd * 0.35, freeboard + 3.9), at(-L * 0.26, Wd * 0.35, freeboard + 4.6),
+    ], 'rgba(38,52,66,0.9)');
+    box(-L * 0.44, -L * 0.36, Wd * 0.13, freeboard + 5.4, freeboard + 7.6, '#2c2f33', '#3a3e42', '#232629');
+    featureQuad(ctx, project, [
+      at(L * 0.47, -0.3, freeboard + 6.4), at(L * 0.47, 0.3, freeboard + 6.4),
+      at(L * 0.47, 0.3, freeboard), at(L * 0.47, -0.3, freeboard),
+    ], '#5d4f40');
+  } else {
+    // Fishing: a wheelhouse with its window band, a working mast
+    // aft with a boom line, and crates stacked on the aft deck.
+    box(-L * 0.3, L * 0.02, Wd * 0.3, freeboard, freeboard + 2.5, '#eef0ea', cabLit, cabShade);
+    featureQuad(ctx, project, [
+      at(-L * 0.28, Wd * 0.31, freeboard + 2.0), at(-L * 0.28, Wd * 0.31, freeboard + 1.3),
+      at(0, Wd * 0.31, freeboard + 1.3), at(0, Wd * 0.31, freeboard + 2.0),
+    ], 'rgba(38,52,66,0.9)');
+    const mastTop = at(-L * 0.4, 0, freeboard + 5.6);
+    const mastFoot = at(-L * 0.4, 0, freeboard);
+    const boomTip = at(-L * 0.52, 0, freeboard + 3.1);
+    const mp = [mastFoot, mastTop, boomTip].map(([x, y, z]) => project(x, y, z));
+    if (!mp.some((p) => !p)) {
+      ctx.strokeStyle = '#4c3d28';
+      ctx.lineWidth = Math.max(1, mp[0].scale * 0.3);
+      ctx.beginPath();
+      ctx.moveTo(mp[0].x, mp[0].y);
+      ctx.lineTo(mp[1].x, mp[1].y);
+      ctx.moveTo(mp[1].x, mp[1].y);
+      ctx.lineTo(mp[2].x, mp[2].y);
+      ctx.stroke();
+    }
+    box(-L * 0.48, -L * 0.36, Wd * 0.26, freeboard, freeboard + 0.9, '#b3986a', '#a8895c', '#8a6f47');
+  }
+}
+
+export function drawBoats(ctx, project, t = 0) {
+  for (const boat of MOORED_BOATS) {
+    drawBoat(ctx, project, boat, { x: boat.x, z: boat.z, heading: boat.heading, moving: false }, t);
+  }
+  for (const lane of BOAT_LANES) {
+    drawBoat(ctx, project, lane, boatPose(lane, t), t);
+  }
+}
+
+// The jetties the moored fleet ties up to: Porto Lume's long wooden
+// pier stepping down its shelving south shore into the harbour, and
+// a short landing stage on Pilot Islet's south shore under the
+// bridge. The deck rides a step above the ground it crosses —
+// beach, then water — on posts, with a lamp at the seaward end.
+const PIERS = [
+  { x0: 2610, z0: 3005, x1: 2610, z1: 3200, w: 7, name: 'porto lume pier' },
+  { x0: 1250, z0: 368, x1: 1250, z1: 520, w: 5, name: 'pilot islet jetty' },
+];
+
+export function drawPier(ctx, project) {
+  for (const pier of PIERS) {
+    const dx = pier.x1 - pier.x0;
+    const dz = pier.z1 - pier.z0;
+    const len = Math.hypot(dx, dz);
+    const ux = dx / len;
+    const uz = dz / len;
+    const px = -uz;
+    const pz = ux;
+    const hw = pier.w / 2;
+    const SEG = Math.max(4, Math.round(len / 16));
+    const deckAt = (tt) => {
+      const gx = pier.x0 + dx * tt;
+      const gz = pier.z0 + dz * tt;
+      return Math.max(2.4, groundHeight(gx, gz) + 1.4);
+    };
+    for (let sgm = 0; sgm < SEG; sgm++) {
+      const t0 = sgm / SEG;
+      const t1 = (sgm + 1) / SEG;
+      const c0 = { x: pier.x0 + dx * t0, z: pier.z0 + dz * t0, y: deckAt(t0) };
+      const c1 = { x: pier.x0 + dx * t1, z: pier.z0 + dz * t1, y: deckAt(t1) };
+      // The skirt first (the deck's shadowed face), then the deck.
+      featureQuad(ctx, project, [
+        [c0.x + px * hw, c0.y, c0.z + pz * hw],
+        [c1.x + px * hw, c1.y, c1.z + pz * hw],
+        [c1.x + px * hw, c1.y - 0.55, c1.z + pz * hw],
+        [c0.x + px * hw, c0.y - 0.55, c0.z + pz * hw],
+      ], '#5d4a33');
+      featureQuad(ctx, project, [
+        [c0.x - px * hw, c0.y, c0.z - pz * hw],
+        [c0.x + px * hw, c0.y, c0.z + pz * hw],
+        [c1.x + px * hw, c1.y, c1.z + pz * hw],
+        [c1.x - px * hw, c1.y, c1.z - pz * hw],
+      ], sgm % 2 ? '#8a6f47' : '#937951');
+      // Posts at each joint, dropping from the deck edge to the sea.
+      if (sgm % 2 === 0) {
+        for (const s of [-1, 1]) {
+          featureQuad(ctx, project, [
+            [c0.x + px * hw * s - ux * 0.5, c0.y, c0.z + pz * hw * s - uz * 0.5],
+            [c0.x + px * hw * s + ux * 0.5, c0.y, c0.z + pz * hw * s + uz * 0.5],
+            [c0.x + px * hw * s + ux * 0.5, -2, c0.z + pz * hw * s + uz * 0.5],
+            [c0.x + px * hw * s - ux * 0.5, -2, c0.z + pz * hw * s - uz * 0.5],
+          ], '#4c3d28');
+        }
+      }
+    }
+    // The end lamp: a post and a warm bead over the last mooring.
+    const endY = deckAt(1);
+    featureQuad(ctx, project, [
+      [pier.x1 - 0.3, endY + 3.2, pier.z1], [pier.x1 + 0.3, endY + 3.2, pier.z1],
+      [pier.x1 + 0.3, endY, pier.z1], [pier.x1 - 0.3, endY, pier.z1],
+    ], '#4c3d28');
+    const lamp = project(pier.x1, endY + 3.5, pier.z1);
+    if (lamp) {
+      ctx.fillStyle = PALETTE.lampAmber;
+      ctx.beginPath();
+      ctx.arc(lamp.x, lamp.y, Math.max(1.2, lamp.scale * 1.3), 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }

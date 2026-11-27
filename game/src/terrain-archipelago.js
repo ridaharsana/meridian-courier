@@ -115,11 +115,20 @@ export function velaSkyline(x, z, h) {
   // The relief lives on the strait side only: it fades out
   // across the summit's south shoulder, so the face the Porto
   // Lume approach looks at keeps its v19 shape exactly.
-  const azg = Math.max(0, Math.min(1, (0.10 - Math.atan2(dx, dz)) / 0.12));
-  const teeth = Math.pow(0.5 + 0.5 * Math.sin(Math.atan2(dx, dz) * 6 + 2.1), 2)
-    * Math.exp(-((r / (VELA.radius * 0.80)) ** 2)) * Math.min(1, r / 130) * azg;
-  const shoulder = Math.exp(-(((x - SHOULDER_X) ** 2 + (z - SHOULDER_Z) ** 2) / (VELA.radius * 0.30) ** 2)) * azg;
-  return gate * (0.12 * teeth + 0.13 * shoulder);
+  const az = Math.atan2(dx, dz);
+  const azg = Math.max(0, Math.min(1, (0.10 - az) / 0.12));
+  // v21: at thumbnail size v20's bumps sat under the outline —
+  // the teeth now bite both ways (crests up, gullies carved
+  // into the dome between them), and a second gate lets them
+  // ring the summit's SE rim, the cover's long right skyline,
+  // above the snowline only, where the approach never reads.
+  const azs = Math.min(1, Math.max(0, (h - 190) / 70))
+    * Math.max(0, Math.min(1, (az + 0.06) / 0.10)) * Math.max(0, Math.min(1, (1.80 - az) / 0.20));
+  const wave = Math.sin(az * 6 + 2.1);
+  const teeth = (0.24 * Math.pow(0.5 + 0.5 * wave, 2) - 0.105 * Math.pow(0.5 - 0.5 * wave, 2))
+    * Math.exp(-((r / (VELA.radius * 0.95)) ** 2)) * Math.min(1, r / 130) * Math.max(azg, azs);
+  const shoulder = Math.exp(-(((x - SHOULDER_X) ** 2 + (z - SHOULDER_Z) ** 2) / (VELA.radius * 0.27) ** 2)) * azg;
+  return gate * (teeth + 0.16 * shoulder);
 }
 
 function ridgeHeight(x, z, h) {

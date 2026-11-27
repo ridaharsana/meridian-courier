@@ -50,7 +50,10 @@ export function applyShotScene(game, name) {
   // v20: the camera rides higher (up 3.4 -> 6.2), pitching the
   // track down the flank so the waterfall's plunge pool — churn,
   // mist and all — lands inside the frame instead of below it.
-  const PROFILE_TRACK = { side: 11, up: 6.2, aim: 18, back: 11, aimSide: -2 };
+  // v21: that height cost the Petrel her size, so the track
+  // closes in (side/back 11 -> 9.5) and keeps most of the pitch
+  // (up 5.6): the plane is v19-big again and the pool stays in.
+  const PROFILE_TRACK = { side: 9.5, up: 5.6, aim: 18, back: 9.5, aimSide: -2 };
   if (name === 'approach') {
     // Leg 3: the waterfront final over the rooftops of Porto Lume.
     // (v16 scouting tried starting further out; the town shrank to

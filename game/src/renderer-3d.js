@@ -348,9 +348,9 @@ export function buildTerrainMesh(detailTex) {
       const ao = (1 - Math.min(0.32, hollow * 0.011)) * (0.95 + 0.05 * Math.min(1, h / 120));
       const sunFace = normals.getX(i) * SUN.x + normals.getY(i) * SUN.y + normals.getZ(i) * SUN.z;
       const lit = Math.max(0, sunFace);
-      tmp.multiplyScalar((0.84 + 0.28 * lit + vg * 0.16 * (1 - lit)) * ao);
+      tmp.multiplyScalar((0.84 + 0.28 * lit + vg * 0.23 * (1 - lit)) * ao);
       tmp.lerp(SUN_WARM, lit * lit * 0.15);
-      tmp.lerp(SHADE_COOL, (Math.max(0, -sunFace) * 0.10 + (1 - lit) * 0.03) * (1 - vg * 0.65));
+      tmp.lerp(SHADE_COOL, (Math.max(0, -sunFace) * 0.10 + (1 - lit) * 0.03) * (1 - vg * 0.75));
     }
     colours[i * 3] = tmp.r; colours[i * 3 + 1] = tmp.g; colours[i * 3 + 2] = tmp.b;
   }
@@ -787,6 +787,10 @@ export function buildWaterfall(group, glowTex) {
   // the fall meets the sea, just past the waterline.
   const bx = FALL.x + FALL.dx * 1115;
   const bz = FALL.z + FALL.dz * 1115;
+  // v21: the foot stands on Pilot Islet's slope at the
+  // Guardian's feet, ~35 m up — the pool stack rides the
+  // surface there instead of lying buried at sea level.
+  const gy = visualHeight(bx, bz);
   // v19: a third, small, near-opaque disc at the plunge point —
   // the churn where the water lands, bright enough to read as
   // impact foam rather than a pale patch.
@@ -796,15 +800,34 @@ export function buildWaterfall(group, glowTex) {
       new THREE.MeshBasicMaterial({ color: hexColor(PALETTE.foam), transparent: true, opacity, depthWrite: false }),
     );
     disc.geometry.rotateX(-Math.PI / 2);
-    disc.position.set(bx, y, bz);
+    disc.position.set(bx, gy + y, bz);
     disc.renderOrder = 2;
     group.add(disc);
   }
+  // v21: the churn melted into the pale shore at thumbnail
+  // size, so the pool wears a dark wet-rock collar and a hard
+  // white foam ring over the core — a landing the eye can find.
+  const collar = new THREE.Mesh(
+    new THREE.RingGeometry(17, 28, 22),
+    new THREE.MeshBasicMaterial({ color: 0x2f3f4a, transparent: true, opacity: 0.5, depthWrite: false }),
+  );
+  collar.geometry.rotateX(-Math.PI / 2);
+  collar.position.set(bx, gy + 0.35, bz);
+  collar.renderOrder = 2;
+  group.add(collar);
+  const foamRing = new THREE.Mesh(
+    new THREE.RingGeometry(10.5, 16.5, 22),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  foamRing.geometry.rotateX(-Math.PI / 2);
+  foamRing.position.set(bx, gy + 0.55, bz);
+  foamRing.renderOrder = 3;
+  group.add(foamRing);
   const mist = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTex, color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false,
   }));
   mist.scale.setScalar(96);
-  mist.position.set(bx, 13, bz);
+  mist.position.set(bx, gy + 10, bz);
   group.add(mist);
   return tex;
 }

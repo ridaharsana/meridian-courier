@@ -29,40 +29,47 @@ export function drawGradeVignette(ctx, width, height) {
   ctx.fillRect(0, 0, width, height);
 }
 
+// v17: the top readout cluster is scaled up a modest step (chips
+// 168x46 -> 188x52, value figures 21px -> 24px) so the numbers
+// carry further down the contact sheet's shrink — kept narrow
+// enough that the cluster still floats over sky, not world.
+const CHIP_W = 188;
+const CHIP_H = 52;
+
 export function drawHudDigits(ctx, plane, width, height) {
   const feet = Math.max(0, Math.round(plane.y * 3.281));
   const knots = Math.round(plane.speed * 1.944);
   const hdg = Math.round(headingDegrees(plane));
-  chip(ctx, width * 0.5 - 268, 14, 'ALTITUDE', `${feet} FT`);
-  chip(ctx, width * 0.5 - 88, 14, 'SPEED', `${knots} KT`);
-  chip(ctx, width * 0.5 + 92, 14, 'HEADING', `${String(hdg).padStart(3, '0')}°`);
+  chip(ctx, width * 0.5 - 292, 14, 'ALTITUDE', `${feet} FT`);
+  chip(ctx, width * 0.5 - 94, 14, 'SPEED', `${knots} KT`);
+  chip(ctx, width * 0.5 + 104, 14, 'HEADING', `${String(hdg).padStart(3, '0')}°`);
   const vs = Math.round(plane.vertical * 196.85);
   ctx.fillStyle = 'rgba(8,12,17,0.72)';
-  ctx.fillRect(width * 0.5 - 268, 64, 168, 24);
+  ctx.fillRect(width * 0.5 - 292, 70, CHIP_W, 26);
   ctx.fillStyle = vs < -700 ? PALETTE.lampRed : '#cfe0ec';
-  ctx.font = '700 13px ui-monospace, monospace';
+  ctx.font = '700 14px ui-monospace, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`V/S ${vs >= 0 ? '+' : ''}${vs} FT/MIN`, width * 0.5 - 184, 80);
+  ctx.fillText(`V/S ${vs >= 0 ? '+' : ''}${vs} FT/MIN`, width * 0.5 - 198, 88);
 }
 
 function chip(ctx, x, y, label, value) {
-  const grad = ctx.createLinearGradient(x, y, x, y + 46);
+  const grad = ctx.createLinearGradient(x, y, x, y + CHIP_H);
   grad.addColorStop(0, 'rgba(24,36,50,0.88)');
   grad.addColorStop(1, 'rgba(8,12,17,0.82)');
   ctx.fillStyle = grad;
-  ctx.fillRect(x, y, 168, 46);
+  ctx.fillRect(x, y, CHIP_W, CHIP_H);
   ctx.fillStyle = PALETTE.lampAmber;
-  ctx.fillRect(x, y, 168, 2.4);
+  ctx.fillRect(x, y, CHIP_W, 2.4);
   ctx.strokeStyle = 'rgba(120,160,190,0.55)';
   ctx.lineWidth = 1.2;
-  ctx.strokeRect(x, y, 168, 46);
+  ctx.strokeRect(x, y, CHIP_W, CHIP_H);
   ctx.fillStyle = '#8fb0c6';
-  ctx.font = '700 10px system-ui, sans-serif';
+  ctx.font = '700 11px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(label, x + 84, y + 15);
+  ctx.fillText(label, x + CHIP_W / 2, y + 17);
   ctx.fillStyle = PALETTE.ink;
-  ctx.font = '700 21px ui-monospace, monospace';
-  ctx.fillText(value, x + 84, y + 39);
+  ctx.font = '700 24px ui-monospace, monospace';
+  ctx.fillText(value, x + CHIP_W / 2, y + 44);
 }
 
 // Ease-out cubic for entrances: fast arrival, gentle landing.
@@ -86,22 +93,22 @@ export function drawMissionBanner(ctx, state, plane, width, entrance = 1) {
   ctx.globalAlpha = e;
   ctx.translate(0, (1 - e) * -16);
   ctx.fillStyle = 'rgba(8,12,17,0.66)';
-  ctx.fillRect(width * 0.5 - 300, 96, 600, 30);
+  ctx.fillRect(width * 0.5 - 330, 98, 660, 33);
   ctx.fillStyle = PALETTE.lampAmber;
-  ctx.font = '700 14px system-ui, sans-serif';
+  ctx.font = '700 15.5px system-ui, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(m.title, width * 0.5, 116);
+  ctx.fillText(m.title, width * 0.5, 120);
   const cue = objectiveCue(state, plane);
   const mins = Math.floor(state.elapsed / 60);
   const secs = String(Math.floor(state.elapsed % 60)).padStart(2, '0');
   ctx.fillStyle = 'rgba(8,12,17,0.66)';
-  ctx.fillRect(width * 0.5 - 300, 130, 600, 28);
+  ctx.fillRect(width * 0.5 - 330, 135, 660, 31);
   ctx.fillStyle = '#eef4f8';
-  ctx.font = '600 13.5px system-ui, sans-serif';
-  ctx.fillText(`▸ ${cue.label} · ${(cue.dist / 1000).toFixed(2)} KM · ${mins}:${secs}`, width * 0.5, 149);
-  const ax = width * 0.5 + 268;
+  ctx.font = '600 15px system-ui, sans-serif';
+  ctx.fillText(`▸ ${cue.label} · ${(cue.dist / 1000).toFixed(2)} KM · ${mins}:${secs}`, width * 0.5, 156);
+  const ax = width * 0.5 + 296;
   ctx.save();
-  ctx.translate(ax, 144);
+  ctx.translate(ax, 151);
   ctx.rotate((cue.turn * Math.PI) / 180);
   ctx.fillStyle = PALETTE.ringNext;
   ctx.beginPath();

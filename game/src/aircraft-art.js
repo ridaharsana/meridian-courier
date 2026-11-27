@@ -8,10 +8,13 @@ import * as THREE from 'three';
 import { PALETTE } from './config.js';
 import { headingDegrees } from './flight-model.js';
 
-const APRICOT = 0xeab96f;
-const APRICOT_DEEP = 0xd99a4e;
-const UMBER = 0xa83c1e;
-const TAIL_RED = 0xc4502e;
+// v17: the Petrel's paint deepened a step — a richer orange body
+// and a hotter tail, so the aeroplane pops against sea and sky at
+// contact-sheet size instead of blending into the golden terrain.
+const APRICOT = 0xf0a83e;
+const APRICOT_DEEP = 0xe08a26;
+const UMBER = 0xb03412;
+const TAIL_RED = 0xd23c14;
 const CREAM = 0xf6ead2;
 
 function petrelFinTexture() {

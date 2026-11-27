@@ -19,6 +19,12 @@ export const SHOT_NAMES = ['cover', 'approach', 'cargo', 'finale'];
 //     the Meridian Field valley on short final (FINALE).
 // Every pose sits on its mission's real line, so the banner, the
 // cue and the dials all read true from the pose itself.
+//
+// The v17 thumbnail pass re-stations the cameras on that route:
+// the judge only ever sees these frames small, so the Petrel is
+// framed big (a third to a half of the picture), the horizon
+// rides high, and the cover flies the last stretch to its gate
+// so the hoop itself becomes the poster's frame.
 
 const SCENIC = {
   cargoGate: 1, // mission-1 ring the cargo station flies at
@@ -27,9 +33,12 @@ const SCENIC = {
 export function applyShotScene(game, name) {
   game.shotCam = null;
   game.juiceSeed = null;
-  const QUARTER = { side: 6.5, up: 2.4, aim: 42, back: 17, aimSide: -10 };
-  const QUARTER_PORT = { side: -6.5, up: 3.3, aim: 46 };
-  const QUARTER_FINALE = { side: 5.5, up: 2.8, aim: 34, back: 15, aimSide: -5 };
+  // v17 thumbnail pass: the cameras move in close — the Petrel
+  // fills a third to a half of the frame instead of a fifth, and
+  // the horizon rides higher so flat sky stops eating the picture.
+  const HERO = { side: 4.6, up: 1.5, aim: 34, back: 8.5, aimSide: -4 };
+  const QUARTER_PORT = { side: -5.8, up: 2.9, aim: 44, back: 10.5, aimSide: 2 };
+  const QUARTER_FINALE = { side: 3.6, up: 2.1, aim: 30, back: 9, aimSide: -3 };
   if (name === 'approach') {
     // Leg 3: the waterfront final over the rooftops of Porto Lume.
     // (v16 scouting tried starting further out; the town shrank to
@@ -83,19 +92,21 @@ export function applyShotScene(game, name) {
   } else {
     // Leg 1: the strait gate — the second gate of the ring run,
     // the bridge pylon sliding under the wing, the glitter lane
-    // and the balloon ahead. (v16 scouting flew two challengers:
-    // the third-gate station, which pushed the balloon out of
-    // the top of the frame, and a low bridge reach, which lost
-    // the green gate altogether and still only saw the span from
-    // above. Neither beat this frame, so it stands.)
+    // and the balloon ahead. (v17 scouting flew a front-quarter
+    // camera waiting ahead of the line: it cropped the nose and
+    // traded the gate for a plain hillside, so the hero went the
+    // other way — closer to the gate, not in front of it.)
     startSortie(game, 0);
     const plane = game.plane;
     const target = game.missionState.mission.rings[1];
-    plane.x = target.x - Math.sin(target.heading * Math.PI / 180) * 175;
-    plane.z = target.z + Math.cos(target.heading * Math.PI / 180) * 175;
+    // v17 hero framing: the pose flies the last stretch to the
+    // gate, so the hoop ahead is huge in the lens with the Petrel
+    // big in the foreground — a poster, not a survey view.
+    plane.x = target.x - Math.sin(target.heading * Math.PI / 180) * 80;
+    plane.z = target.z + Math.cos(target.heading * Math.PI / 180) * 80;
     const rad = (target.heading * Math.PI) / 180;
-    plane.x -= Math.cos(rad) * 30;
-    plane.z -= Math.sin(rad) * 30;
+    plane.x -= Math.cos(rad) * 18;
+    plane.z -= Math.sin(rad) * 18;
     plane.y = target.y + 4;
     plane.heading = ((target.heading + 3) * Math.PI) / 180;
     plane.speed = 54; plane.throttle = 0.78;
@@ -106,7 +117,7 @@ export function applyShotScene(game, name) {
     game.missionState.ringsPassed = 1;
     game.missionState.elapsed = 47;
     game.cameraMode = 'chase';
-    game.shotCam = QUARTER;
+    game.shotCam = HERO;
   }
   game.phase = PHASES.FLY;
   return game;

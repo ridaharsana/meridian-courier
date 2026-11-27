@@ -8,7 +8,7 @@
 
 import * as THREE from 'three';
 import { WORLD, PALETTE, RUNWAYS, ISLANDS } from './config.js';
-import { groundHeight, visualHeight, surfaceKind, chartNoise, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
+import { groundHeight, visualHeight, surfaceKind, chartNoise, ridgeCrest, TOWN_BLOCKS, LANDMARKS } from './terrain-archipelago.js';
 import { buildPetrelAircraft, updatePetrelAircraft } from './aircraft-art.js';
 import { createLifeWorld, updateLifeWorld } from './traffic-and-life.js';
 import { nextRing } from './missions.js';
@@ -297,6 +297,9 @@ function biomeColour(x, z, h, slope, out) {
 // faces take a warm kiss, slopes turned away fall cool.
 const SUN_WARM = new THREE.Color('#ffbe78');
 const SHADE_COOL = new THREE.Color('#5f7ca6');
+// v18: the ridge crests wear bare grey rock, so the new skyline
+// reads as mountain, not lawn, where the ridge ring takes over.
+const CREST_ROCK = new THREE.Color('#8a8d90');
 
 export function buildTerrainMesh(detailTex) {
   const SEG = 190;
@@ -320,6 +323,8 @@ export function buildTerrainMesh(detailTex) {
     const h = pos.getY(i);
     const slope = 1 - normals.getY(i);
     biomeColour(x, z, h, slope, tmp);
+    const crest = ridgeCrest(x, z, h);
+    if (crest > 0.3) tmp.lerp(CREST_ROCK, Math.min(0.78, (crest - 0.3) * 1.15));
     // Baked light (v15). The directional sun alone leaves the smooth
     // island domes reading flat, so two cheap terms are folded into
     // the vertex colour: a fake ambient occlusion — ground whose
@@ -672,6 +677,144 @@ export function buildBridge(group) {
   }
   group.add(bridge);
   return { deckY };
+}
+
+// ------------------------------------------------------------------
+// v18 landmarks: the Vela waterfall and the strait guardian — the
+// two silhouettes the thumbnail can remember the archipelago by.
+
+// The fall drops down Mount Vela's strait-facing flank, on the
+// azimuth the mail run looks at, from the high shoulder to a foam
+// patch in the sea. The ribbon hugs the relieved mesh; its streak
+// texture scrolls (syncWorld) so the water is always falling.
+const FALL = { x: 1900, z: -700, dx: -0.635, dz: 0.774 };
+
+function waterfallTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(178,220,244,0.88)';
+  g.fillRect(0, 0, 64, 256);
+  const rng = makeRng(9182);
+  for (let i = 0; i < 46; i++) {
+    const x = rng() * 64;
+    g.fillStyle = `rgba(255,255,255,${0.25 + rng() * 0.55})`;
+    g.fillRect(x, rng() * 40, 1.6 + rng() * 2.6, 90 + rng() * 150);
+  }
+  for (let i = 0; i < 12; i++) {
+    g.fillStyle = `rgba(90,150,190,${0.16 + rng() * 0.2})`;
+    g.fillRect(rng() * 64, rng() * 60, 2.5 + rng() * 3, 120 + rng() * 120);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 3);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export function buildWaterfall(group, glowTex) {
+  const tex = waterfallTexture();
+  const SEGMENTS = 30;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const r = 300 + (795 * i) / SEGMENTS;
+    const px = FALL.x + FALL.dx * r;
+    const pz = FALL.z + FALL.dz * r;
+    const w = 4.5 + (r - 300) / 795 * 9;
+    const y = visualHeight(px, pz) + 1.5;
+    positions.push(
+      px - FALL.dz * w, y, pz + FALL.dx * w,
+      px + FALL.dz * w, y, pz - FALL.dx * w,
+    );
+    uvs.push(0, i / SEGMENTS * 3, 1, i / SEGMENTS * 3);
+    if (i < SEGMENTS) {
+      const b = i * 2;
+      indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const fall = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, opacity: 0.94, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  fall.renderOrder = 3;
+  group.add(fall);
+  // The plunge pool: two foam discs and a breath of mist where
+  // the fall meets the sea, just past the waterline.
+  const bx = FALL.x + FALL.dx * 1115;
+  const bz = FALL.z + FALL.dz * 1115;
+  for (const [radius, opacity, y] of [[34, 0.5, 0.34], [19, 0.8, 0.44]]) {
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(radius, 22),
+      new THREE.MeshBasicMaterial({ color: hexColor(PALETTE.foam), transparent: true, opacity, depthWrite: false }),
+    );
+    disc.geometry.rotateX(-Math.PI / 2);
+    disc.position.set(bx, y, bz);
+    disc.renderOrder = 2;
+    group.add(disc);
+  }
+  const mist = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex, color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false,
+  }));
+  mist.scale.setScalar(84);
+  mist.position.set(bx, 13, bz);
+  group.add(mist);
+  return tex;
+}
+
+// The Guardian of the Strait: a colossal weathered figure on the
+// Pilot Islet summit, spear raised over the bridge reach, facing
+// the incoming ring line. Built from plain stone blocks on a
+// stepped plinth — a silhouette first, a statue second: at
+// thumbnail size the raised spear and helm crest are the read.
+export function buildGuardian(group) {
+  const stone = new THREE.MeshStandardMaterial({ color: 0x918f85, roughness: 0.95 });
+  const stoneDark = new THREE.MeshStandardMaterial({ color: 0x747268, roughness: 0.97 });
+  const moss = new THREE.MeshStandardMaterial({ color: 0x67754d, roughness: 1 });
+  const g = new THREE.Group();
+  const box = (mat, w, h, d, x, y, z, rz = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.rotation.z = rz;
+    g.add(m);
+    return m;
+  };
+  box(moss, 30, 5, 30, 0, 2.5, 0);
+  box(stoneDark, 23, 5, 23, 0, 7.5, 0);
+  box(stone, 17, 5, 17, 0, 12.5, 0);
+  box(stoneDark, 3.4, 20, 3.6, -3.4, 25, 0);
+  box(stoneDark, 3.4, 20, 3.6, 3.4, 25, 0);
+  const robe = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 8.8, 24, 6), stone);
+  robe.position.y = 47;
+  g.add(robe);
+  box(stone, 13.5, 9, 6.5, 0, 63.5, 0);
+  box(stoneDark, 16, 3.5, 5, 0, 69.5, 0);
+  box(stone, 3, 19, 3, -8.8, 57, 0, 0.1); // left arm, lowered
+  box(stone, 3, 13, 3, 10.2, 73, 0, -0.85); // right arm, raised
+  box(stone, 2.6, 11, 2.6, 15.2, 81, 0, -0.22);
+  const spear = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 58, 6), stoneDark);
+  spear.position.set(17.2, 93, 0);
+  g.add(spear);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(1.15, 5.5, 6), stone);
+  tip.position.set(17.2, 124.5, 0);
+  g.add(tip);
+  box(stoneDark, 3, 3, 3, 0, 72.5, 0);
+  box(stone, 6.4, 7.6, 6.2, 0, 78, 0);
+  box(stoneDark, 6.9, 1.6, 1.3, 0, 79.6, -3.3); // the brow slab
+  box(stone, 0.9, 4.6, 10.5, 0, 84.2, -0.3); // the helm crest
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  // Face the strait gate: the ring line's second hoop.
+  const fx = 530 - 1250;
+  const fz = 1100 - 150;
+  g.rotation.y = Math.atan2(-fx, -fz);
+  g.position.set(1250, groundHeight(1250, 150) - 1.5, 150);
+  group.add(g);
 }
 
 export function buildLighthouses(group, glowTex) {
@@ -1037,6 +1180,8 @@ export function createWorld(canvas) {
   buildRockOutcrops(dressing);
   buildFoamRings(dressing);
   buildBridge(dressing);
+  world.fallTex = buildWaterfall(dressing, makeGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'));
+  buildGuardian(dressing);
   world.life = createLifeWorld(makeGlowTexture('rgba(255,190,110,1)', 'rgba(255,150,60,0)'));
   dressing.add(world.life.group);
   buildLighthouses(dressing, makeGlowTexture('rgba(255,215,150,1)', 'rgba(255,190,110,0)'));
@@ -1107,6 +1252,9 @@ export function syncWorld(world, game, cameraState, pool, t, dt) {
   if (world.waterBump) {
     world.waterBump.offset.set((t * 0.006) % 1, (t * 0.0041) % 1);
   }
+  // The fall falls (v18): its streak texture scrolls down the
+  // flank, one full repeat every couple of seconds.
+  if (world.fallTex) world.fallTex.offset.y = -((t * 0.45) % 1);
 
   updatePetrelAircraft(world.petrel, plane, t);
   world.petrel.group.visible = game.cameraMode !== 'cockpit';

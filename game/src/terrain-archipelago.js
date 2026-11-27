@@ -64,6 +64,53 @@ export function detailNoise(x, z) {
   return a; // -1..1
 }
 
+// The ridge layer (v18) — visual only, like the detail crinkle
+// above. The two high islands stop reading as smooth domes: each
+// grows a ring of satellite crests around a sharpened main peak,
+// with carved gullies between the crests, so the skyline runs
+// jagged against the sky. It is gated to high ground (beaches,
+// the town shore and the waterline never move) and scaled by the
+// same plateau fade as the crinkle, so the strips stay clean.
+const RIDGE_ISLANDS = ISLANDS.filter((i) => i.peak >= 150);
+
+export function ridgeCrest(x, z, h) {
+  // 0..1: how strongly the ridge ring owns this point — the mesh
+  // builder also reads it to lay bare rock on the crests.
+  if (h < 18) return 0;
+  let best = 0;
+  for (const isl of RIDGE_ISLANDS) {
+    const dx = x - isl.x;
+    const dz = z - isl.z;
+    const r = Math.hypot(dx, dz);
+    if (r > isl.radius * 1.05) continue;
+    const gate = Math.min(1, (h - 18) / 55);
+    const env = Math.pow(Math.sin(Math.min(1, r / isl.radius) * Math.PI), 1.2);
+    const crests = Math.pow(0.5 + 0.5 * Math.sin(Math.atan2(dx, dz) * 3 + isl.x * 0.01), 1.6);
+    best = Math.max(best, crests * env * gate);
+  }
+  return best;
+}
+
+function ridgeHeight(x, z, h) {
+  let add = 0;
+  for (const isl of RIDGE_ISLANDS) {
+    const dx = x - isl.x;
+    const dz = z - isl.z;
+    const r = Math.hypot(dx, dz);
+    if (r > isl.radius * 1.05) continue;
+    const gate = Math.min(1, Math.max(0, (h - 18) / 55));
+    if (gate <= 0) continue;
+    const ang = Math.atan2(dx, dz) * 3 + isl.x * 0.01;
+    const env = Math.pow(Math.sin(Math.min(1, r / isl.radius) * Math.PI), 1.2);
+    const crests = Math.pow(0.5 + 0.5 * Math.sin(ang), 1.6);
+    const gully = Math.pow(0.5 + 0.5 * Math.sin(ang + Math.PI), 2);
+    add += isl.peak * gate * env * (0.17 * crests - 0.055 * gully);
+    // The sharpened main peak: a cone boost over the summit.
+    add += isl.peak * 0.11 * gate * Math.exp(-((r / (isl.radius * 0.34)) ** 2));
+  }
+  return add;
+}
+
 export function visualHeight(x, z) {
   const h = groundHeight(x, z);
   if (h < 1.0) return h;
@@ -76,7 +123,7 @@ export function visualHeight(x, z) {
     if (d < 110) fade *= Math.min(1, d / 110);
   }
   const amp = 3.4 * Math.min(1, h / 60 + 0.35);
-  return h + detailNoise(x, z) * amp * fade;
+  return h + detailNoise(x, z) * amp * fade + ridgeHeight(x, z, h) * fade;
 }
 
 export function surfaceKind(x, z, h) {

@@ -39,6 +39,11 @@ export function applyShotScene(game, name) {
   const HERO = { side: 4.6, up: 1.5, aim: 34, back: 8.5, aimSide: -4 };
   const QUARTER_PORT = { side: -5.8, up: 2.9, aim: 44, back: 10.5, aimSide: 2 };
   const QUARTER_FINALE = { side: 3.6, up: 2.1, aim: 30, back: 9, aimSide: -3 };
+  // v18: the cargo camera leaves the chase family altogether —
+  // a tracking station off the starboard quarter, so the Petrel
+  // stretches her full flank across the frame against Vela and
+  // her waterfall (scout V3).
+  const PROFILE_TRACK = { side: 13, up: 1.8, aim: 16, back: 9, aimSide: -2 };
   if (name === 'approach') {
     // Leg 3: the waterfront final over the rooftops of Porto Lume.
     // (v16 scouting tried starting further out; the town shrank to
@@ -46,11 +51,15 @@ export function applyShotScene(game, name) {
     // v15 framing stands.)
     startSortie(game, 1);
     const plane = game.plane;
-    plane.x = 2500; plane.z = 3050; plane.y = 128;
+    // v18: the final is flown lower and closer in, so the
+    // waterfront rooftops fill the windscreen instead of sitting
+    // in a bowl of sky and sea — same strip, same heading, every
+    // figure still computed from the pose.
+    plane.x = 2500; plane.z = 2860; plane.y = 88;
     plane.heading = 0; // strip 36 runs north: final is flown on heading 000
     plane.speed = 34; plane.throttle = 0.34;
     plane.gearDown = true; plane.onGround = false;
-    plane.pitch = -0.06;
+    plane.pitch = -0.11;
     game.cameraMode = 'cockpit';
   } else if (name === 'cargo') {
     // Leg 2: at the second mail gate, Vela ahead, the bridge astarboard.
@@ -69,7 +78,7 @@ export function applyShotScene(game, name) {
     game.missionState.ringsPassed = 1;
     game.missionState.elapsed = 64;
     game.cameraMode = 'chase';
-    game.shotCam = QUARTER_PORT;
+    game.shotCam = PROFILE_TRACK;
   } else if (name === 'finale') {
     // Leg 4: the valley return — the ring run complete, home down
     // the Meridian Field valley on short final. (v16 scouting flew

@@ -18,15 +18,23 @@ const TAIL_RED = 0xd23c14;
 const CREAM = 0xf6ead2;
 
 function petrelFinTexture() {
+  // v18 racing livery: the fin trades its wordmark for a bold
+  // roundel and race number — concentric rings and one big digit
+  // stay legible long after lettering has shrunk away.
   const c = document.createElement('canvas');
   c.width = 256; c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#c4502e';
+  g.fillStyle = '#20365e';
   g.fillRect(0, 0, 256, 128);
+  g.fillStyle = '#f6ead2';
+  g.fillRect(0, 112, 256, 16);
+  g.beginPath(); g.arc(128, 58, 47, 0, Math.PI * 2); g.fillStyle = '#f6ead2'; g.fill();
+  g.beginPath(); g.arc(128, 58, 38, 0, Math.PI * 2); g.fillStyle = '#d23c14'; g.fill();
+  g.beginPath(); g.arc(128, 58, 29, 0, Math.PI * 2); g.fillStyle = '#20365e'; g.fill();
   g.fillStyle = '#fdf6e0';
-  g.font = '800 44px Georgia, serif';
+  g.font = '800 40px Georgia, serif';
   g.textAlign = 'center';
-  g.fillText('PETREL', 128, 78);
+  g.fillText('7', 128, 73);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -70,11 +78,25 @@ export function buildPetrelAircraft(options = {}) {
   fuselage.castShadow = true;
   body.add(fuselage);
 
-  // The umber cheatline: a slim band carried down both flanks.
-  for (const sideSign of [-1, 1]) {
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 5.6), umber);
-    band.position.set(0.8 * sideSign, 0.08, -0.5);
-    body.add(band);
+  // v18 racing livery: a bold navy cheatline over a cream pinline
+  // down both flanks (it replaces the old slim umber band), so the
+  // airframe carries a stripe the thumbnail can see, not just a
+  // paint tint. The stripes are partial lathe shells on the
+  // fuselage's own profile, scaled a breath proud, so they hug
+  // the taper from nose to tail: in lathe space phi 0 is the
+  // spine and phi pi/2 the widest line, so each flank's band is
+  // a phi sector centred a breath above that line.
+  const navy = new THREE.MeshStandardMaterial({ color: 0x20365e, roughness: 0.5, metalness: 0.05 });
+  const stripeProfile = profile.map((p) => new THREE.Vector2(p.x * 1.03, p.y));
+  for (const phiStart of [1.19, 4.3]) {
+    const stripeGeo = new THREE.LatheGeometry(stripeProfile, 10, phiStart, 0.76);
+    stripeGeo.rotateX(-Math.PI / 2);
+    stripeGeo.translate(0, 0, 4.2);
+    body.add(new THREE.Mesh(stripeGeo, navy));
+    const pinGeo = new THREE.LatheGeometry(stripeProfile, 6, phiStart - 0.24, 0.2);
+    pinGeo.rotateX(-Math.PI / 2);
+    pinGeo.translate(0, 0, 4.2);
+    body.add(new THREE.Mesh(pinGeo, cream));
   }
 
   // The belly cargo pod: a faired capsule slung under the fuselage,
@@ -114,6 +136,12 @@ export function buildPetrelAircraft(options = {}) {
     tip.position.set(3.95 * sideSign, 0.11, -0.55);
     tip.rotation.z = 0.07 * sideSign;
     body.add(tip);
+    // v18: a navy chord band wraps the wing just inboard of the
+    // cream tip — the livery's second stripe, read from above.
+    const wingBand = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.17, 1.34), navy);
+    wingBand.position.set(3.05 * sideSign, 0.03, -0.55);
+    wingBand.rotation.z = 0.07 * sideSign;
+    body.add(wingBand);
     const flap = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.07, 0.34), umber);
     flap.position.set(1.7 * sideSign, 0.03, 0.22);
     flap.rotation.z = 0.07 * sideSign;

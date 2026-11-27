@@ -43,7 +43,11 @@ export function applyShotScene(game, name) {
   // a tracking station off the starboard quarter, so the Petrel
   // stretches her full flank across the frame against Vela and
   // her waterfall (scout V3).
-  const PROFILE_TRACK = { side: 13, up: 1.8, aim: 16, back: 9, aimSide: -2 };
+  // v19: the station moves up the line (see the cargo pose) and
+  // the camera squares up — equal side and back, riding higher —
+  // so plane, falls and Guardian compose as one picture instead
+  // of two halves split by open sea.
+  const PROFILE_TRACK = { side: 11, up: 3.4, aim: 18, back: 11, aimSide: -2 };
   if (name === 'approach') {
     // Leg 3: the waterfront final over the rooftops of Porto Lume.
     // (v16 scouting tried starting further out; the town shrank to
@@ -67,16 +71,22 @@ export function applyShotScene(game, name) {
     const plane = game.plane;
     const target = game.missionState.mission.rings[SCENIC.cargoGate];
     const rad = (target.heading * Math.PI) / 180;
-    plane.x = target.x - Math.sin(rad) * 190;
-    plane.z = target.z + Math.cos(rad) * 190;
+    // v19: just through the second gate, on the last leg — from
+    // here the falls, the Guardian and Vela's flank all stand in
+    // the same half of the sky, close enough to fill the middle
+    // of the frame the v18 station left as open sea. The cue
+    // still reads true: gates 1-2 behind her, gate 3 ahead.
+    plane.x = target.x + Math.sin(rad) * 60;
+    plane.z = target.z - Math.cos(rad) * 60;
     plane.y = target.y + 4;
     plane.heading = ((target.heading + 3) * Math.PI) / 180;
     plane.speed = 52; plane.throttle = 0.72;
     plane.roll = 0.2; plane.onGround = false;
     game.juiceSeed = 'cargo';
     game.missionState.mission.rings[0].passed = true;
-    game.missionState.ringsPassed = 1;
-    game.missionState.elapsed = 64;
+    game.missionState.mission.rings[1].passed = true;
+    game.missionState.ringsPassed = 2;
+    game.missionState.elapsed = 96;
     game.cameraMode = 'chase';
     game.shotCam = PROFILE_TRACK;
   } else if (name === 'finale') {

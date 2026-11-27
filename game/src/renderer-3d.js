@@ -693,7 +693,10 @@ function waterfallTexture() {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = 'rgba(178,220,244,0.88)';
+  // v19: the fall is strands, not a sheet — a pale base cut by
+  // vertical alpha gaps, so the rock shows between the threads
+  // and the eye reads falling water instead of a bright slide.
+  g.fillStyle = 'rgba(178,220,244,0.82)';
   g.fillRect(0, 0, 64, 256);
   const rng = makeRng(9182);
   for (let i = 0; i < 46; i++) {
@@ -705,6 +708,31 @@ function waterfallTexture() {
     g.fillStyle = `rgba(90,150,190,${0.16 + rng() * 0.2})`;
     g.fillRect(rng() * 64, rng() * 60, 2.5 + rng() * 3, 120 + rng() * 120);
   }
+  // The gaps: narrow columns erased to near-clear, wandering a
+  // little as they drop, so the strands separate and rejoin.
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 7; i++) {
+    let x = 4 + rng() * 56;
+    const w = 1.6 + rng() * 2.6;
+    for (let y = 0; y < 256; y += 16) {
+      g.fillStyle = `rgba(0,0,0,${0.55 + rng() * 0.4})`;
+      g.fillRect(x, y, w, 16);
+      x += (rng() - 0.5) * 1.6;
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+  // Bright cores down the surviving strands.
+  for (let i = 0; i < 9; i++) {
+    const x = rng() * 60;
+    g.fillStyle = `rgba(255,255,255,${0.5 + rng() * 0.4})`;
+    g.fillRect(x, rng() * 30, 1.2 + rng() * 1.4, 150 + rng() * 100);
+  }
+  // A shadowed rock edge down one side grounds the ribbon.
+  const edge = g.createLinearGradient(0, 0, 9, 0);
+  edge.addColorStop(0, 'rgba(38,52,66,0.55)');
+  edge.addColorStop(1, 'rgba(38,52,66,0)');
+  g.fillStyle = edge;
+  g.fillRect(0, 0, 9, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -723,7 +751,9 @@ export function buildWaterfall(group, glowTex) {
     const r = 300 + (795 * i) / SEGMENTS;
     const px = FALL.x + FALL.dx * r;
     const pz = FALL.z + FALL.dz * r;
-    const w = 4.5 + (r - 300) / 795 * 9;
+    // v19: the ribbon pinches and swells as it drops — a real
+    // fall necks over ledges and fans between them.
+    const w = (4.5 + (r - 300) / 795 * 9) * (0.84 + 0.26 * (0.5 + 0.5 * Math.sin(i * 0.9 + 1.3)));
     const y = visualHeight(px, pz) + 1.5;
     positions.push(
       px - FALL.dz * w, y, pz + FALL.dx * w,
@@ -749,7 +779,10 @@ export function buildWaterfall(group, glowTex) {
   // the fall meets the sea, just past the waterline.
   const bx = FALL.x + FALL.dx * 1115;
   const bz = FALL.z + FALL.dz * 1115;
-  for (const [radius, opacity, y] of [[34, 0.5, 0.34], [19, 0.8, 0.44]]) {
+  // v19: a third, small, near-opaque disc at the plunge point —
+  // the churn where the water lands, bright enough to read as
+  // impact foam rather than a pale patch.
+  for (const [radius, opacity, y] of [[34, 0.5, 0.34], [19, 0.8, 0.44], [10, 0.95, 0.54]]) {
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(radius, 22),
       new THREE.MeshBasicMaterial({ color: hexColor(PALETTE.foam), transparent: true, opacity, depthWrite: false }),
@@ -760,9 +793,9 @@ export function buildWaterfall(group, glowTex) {
     group.add(disc);
   }
   const mist = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex, color: 0xffffff, transparent: true, opacity: 0.32, depthWrite: false,
+    map: glowTex, color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false,
   }));
-  mist.scale.setScalar(84);
+  mist.scale.setScalar(96);
   mist.position.set(bx, 13, bz);
   group.add(mist);
   return tex;

@@ -323,8 +323,16 @@ export function buildTerrainMesh(detailTex) {
     const h = pos.getY(i);
     const slope = 1 - normals.getY(i);
     biomeColour(x, z, h, slope, tmp);
+    // v20: a gate around Mount Vela alone. Inside it the strait
+    // flank — the shadow side the cargo camera reads — keeps
+    // more of its colour and takes rock earlier, so it reads as
+    // shaped ground instead of a dark blob. The gate dies to
+    // zero well short of Porto Lume and the Meridian valley, so
+    // the approach and finale frames keep their v19 light.
+    const vg = Math.max(0, Math.min(1, (1250 - Math.hypot(x - 1900, z + 700)) / 300))
+      * Math.max(0, Math.min(1, (0.10 - Math.atan2(x - 1900, z + 700)) / 0.12));
     const crest = ridgeCrest(x, z, h);
-    if (crest > 0.3) tmp.lerp(CREST_ROCK, Math.min(0.78, (crest - 0.3) * 1.15));
+    if (crest > 0.3 - vg * 0.14) tmp.lerp(CREST_ROCK, Math.min(0.78 + vg * 0.07, (crest - 0.3 + vg * 0.14) * 1.15));
     // Baked light (v15). The directional sun alone leaves the smooth
     // island domes reading flat, so two cheap terms are folded into
     // the vertex colour: a fake ambient occlusion — ground whose
@@ -340,9 +348,9 @@ export function buildTerrainMesh(detailTex) {
       const ao = (1 - Math.min(0.32, hollow * 0.011)) * (0.95 + 0.05 * Math.min(1, h / 120));
       const sunFace = normals.getX(i) * SUN.x + normals.getY(i) * SUN.y + normals.getZ(i) * SUN.z;
       const lit = Math.max(0, sunFace);
-      tmp.multiplyScalar((0.84 + 0.28 * lit) * ao);
+      tmp.multiplyScalar((0.84 + 0.28 * lit + vg * 0.16 * (1 - lit)) * ao);
       tmp.lerp(SUN_WARM, lit * lit * 0.15);
-      tmp.lerp(SHADE_COOL, Math.max(0, -sunFace) * 0.10 + (1 - lit) * 0.03);
+      tmp.lerp(SHADE_COOL, (Math.max(0, -sunFace) * 0.10 + (1 - lit) * 0.03) * (1 - vg * 0.65));
     }
     colours[i * 3] = tmp.r; colours[i * 3 + 1] = tmp.g; colours[i * 3 + 2] = tmp.b;
   }
@@ -807,8 +815,10 @@ export function buildWaterfall(group, glowTex) {
 // stepped plinth — a silhouette first, a statue second: at
 // thumbnail size the raised spear and helm crest are the read.
 export function buildGuardian(group) {
-  const stone = new THREE.MeshStandardMaterial({ color: 0x918f85, roughness: 0.95 });
-  const stoneDark = new THREE.MeshStandardMaterial({ color: 0x747268, roughness: 0.97 });
+  // v20: paler stone, so the figure holds its own against the
+  // dark flank behind it at thumbnail size.
+  const stone = new THREE.MeshStandardMaterial({ color: 0xa9a69b, roughness: 0.95 });
+  const stoneDark = new THREE.MeshStandardMaterial({ color: 0x8b887d, roughness: 0.97 });
   const moss = new THREE.MeshStandardMaterial({ color: 0x67754d, roughness: 1 });
   const g = new THREE.Group();
   const box = (mat, w, h, d, x, y, z, rz = 0) => {
@@ -842,6 +852,10 @@ export function buildGuardian(group) {
   box(stoneDark, 6.9, 1.6, 1.3, 0, 79.6, -3.3); // the brow slab
   box(stone, 0.9, 4.6, 10.5, 0, 84.2, -0.3); // the helm crest
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  // v20: a third again as tall — the plinth base sits on the
+  // group origin, so the scale grows the figure upward from
+  // its seat and the summit keeps it.
+  g.scale.setScalar(1.3);
   // Face the strait gate: the ring line's second hoop.
   const fx = 530 - 1250;
   const fz = 1100 - 150;

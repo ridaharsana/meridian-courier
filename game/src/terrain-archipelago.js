@@ -88,7 +88,38 @@ export function ridgeCrest(x, z, h) {
     const crests = Math.pow(0.5 + 0.5 * Math.sin(Math.atan2(dx, dz) * 3 + isl.x * 0.01), 1.6);
     best = Math.max(best, crests * env * gate);
   }
-  return best;
+  // v20: Vela's skyline relief wears rock too (see velaSkyline).
+  return Math.max(best, Math.min(1, velaSkyline(x, z, h) * 6));
+}
+
+// v20: Mount Vela's skyline relief. From the cover station the
+// mountain stands 2.3 km off, and the v18 ring alone leaves its
+// outline one smooth arc — so Vela (and only Vela: the other
+// ridge island keeps its v18 shaping, and the finale's valley is
+// untouched) grows a shoulder peak on its western flank, clear
+// of the waterfall line, and a ring of teeth under the summit.
+// Returns a fraction of the peak height; ridgeCrest reads the
+// same shape so the new skyline wears rock, not lawn.
+const VELA = ISLANDS.find((i) => i.peak >= 300);
+const SHOULDER_R = VELA ? VELA.radius * 0.42 : 0;
+const SHOULDER_X = VELA ? VELA.x + Math.sin(-1.35) * SHOULDER_R : 0;
+const SHOULDER_Z = VELA ? VELA.z + Math.cos(-1.35) * SHOULDER_R : 0;
+
+export function velaSkyline(x, z, h) {
+  if (!VELA || h < 18) return 0;
+  const dx = x - VELA.x;
+  const dz = z - VELA.z;
+  const r = Math.hypot(dx, dz);
+  if (r > VELA.radius * 1.05) return 0;
+  const gate = Math.min(1, (h - 18) / 55);
+  // The relief lives on the strait side only: it fades out
+  // across the summit's south shoulder, so the face the Porto
+  // Lume approach looks at keeps its v19 shape exactly.
+  const azg = Math.max(0, Math.min(1, (0.10 - Math.atan2(dx, dz)) / 0.12));
+  const teeth = Math.pow(0.5 + 0.5 * Math.sin(Math.atan2(dx, dz) * 6 + 2.1), 2)
+    * Math.exp(-((r / (VELA.radius * 0.80)) ** 2)) * Math.min(1, r / 130) * azg;
+  const shoulder = Math.exp(-(((x - SHOULDER_X) ** 2 + (z - SHOULDER_Z) ** 2) / (VELA.radius * 0.30) ** 2)) * azg;
+  return gate * (0.12 * teeth + 0.13 * shoulder);
 }
 
 function ridgeHeight(x, z, h) {
@@ -108,6 +139,8 @@ function ridgeHeight(x, z, h) {
     // The sharpened main peak: a cone boost over the summit.
     add += isl.peak * 0.11 * gate * Math.exp(-((r / (isl.radius * 0.34)) ** 2));
   }
+  // v20: the skyline relief (shoulder + teeth) on Vela alone.
+  if (VELA) add += VELA.peak * velaSkyline(x, z, h);
   return add;
 }
 

@@ -47,7 +47,10 @@ export function applyShotScene(game, name) {
   // the camera squares up — equal side and back, riding higher —
   // so plane, falls and Guardian compose as one picture instead
   // of two halves split by open sea.
-  const PROFILE_TRACK = { side: 11, up: 3.4, aim: 18, back: 11, aimSide: -2 };
+  // v20: the camera rides higher (up 3.4 -> 6.2), pitching the
+  // track down the flank so the waterfall's plunge pool — churn,
+  // mist and all — lands inside the frame instead of below it.
+  const PROFILE_TRACK = { side: 11, up: 6.2, aim: 18, back: 11, aimSide: -2 };
   if (name === 'approach') {
     // Leg 3: the waterfront final over the rooftops of Porto Lume.
     // (v16 scouting tried starting further out; the town shrank to
